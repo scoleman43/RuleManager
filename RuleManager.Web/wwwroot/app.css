@@ -74,3 +74,22 @@ h1:focus {
     color: #41464b;
     border: 1px solid #adb5bd;
 }
+
+
+.consistency-aligned {
+    background-color: #d1e7dd;
+    color: #0f5132;
+    border: 1px solid #75b798;
+}
+
+.consistency-issues {
+    background-color: #fff3cd;
+    color: #664d03;
+    border: 1px solid #ffda6a;
+}
+
+.consistency-none {
+    background-color: #e2e3e5;
+    color: #41464b;
+    border: 1px solid #adb5bd;
+}
