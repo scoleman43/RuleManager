@@ -12,6 +12,7 @@ public enum RuleImportStatus
     Changed,
     Unchanged,
     Duplicate,
+    ClientSpecific,
     Unsupported
 }
 
@@ -27,6 +28,7 @@ public sealed class RuleImportPreviewItem
     public bool MatchAllConditions { get; init; } = true;
     public string? OriginalConditionsJson { get; init; }
     public string? OriginalOutputsJson { get; init; }
+    public bool IsAccountSpecific { get; init; }
     public bool IsReadOnlyImport { get; init; }
     public string? UnsupportedReason { get; init; }
     public RuleImportStatus Status { get; set; }
@@ -34,6 +36,12 @@ public sealed class RuleImportPreviewItem
     public bool Selected { get; set; }
     public string? ClientComparison { get; set; }
 }
+
+public sealed record RuleImportApplyResult(
+    int Added,
+    int Updated,
+    int ClientSpecificAdded,
+    int ClientSpecificUpdated);
 
 public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbContext> dbFactory)
 {
@@ -78,6 +86,13 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                 continue;
             }
 
+            if (item.IsAccountSpecific)
+            {
+                item.Status = RuleImportStatus.ClientSpecific;
+                item.Selected = true;
+                continue;
+            }
+
             if (!existingByName.TryGetValue(item.Name, out var existing))
             {
                 item.Status = RuleImportStatus.New;
@@ -102,23 +117,33 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
         return parsed;
     }
 
-    public async Task<(int Added, int Updated)> ApplyAsync(
+    public async Task<RuleImportApplyResult> ApplyAsync(
         Guid organizationId,
         IEnumerable<RuleImportPreviewItem> items,
+        Guid? clientId = null,
         CancellationToken cancellationToken = default)
     {
-        var selected = items
+        var selectedLibraryRules = items
             .Where(x => x.Selected && x.Status is RuleImportStatus.New or RuleImportStatus.Changed)
             .ToList();
 
-        if (selected.Count == 0)
-            return (0, 0);
+        var selectedClientSpecificRules = items
+            .Where(x => x.Selected && x.Status == RuleImportStatus.ClientSpecific)
+            .ToList();
+
+        if (selectedClientSpecificRules.Count > 0 && !clientId.HasValue)
+            throw new InvalidOperationException("Select a client before importing account-specific rules.");
+
+        if (selectedLibraryRules.Count == 0 && selectedClientSpecificRules.Count == 0)
+            return new RuleImportApplyResult(0, 0, 0, 0);
 
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
         var added = 0;
         var updated = 0;
+        var clientSpecificAdded = 0;
+        var clientSpecificUpdated = 0;
 
-        var importedCategoryNames = selected
+        var importedCategoryNames = selectedLibraryRules
             .Select(x => x.CategoryName)
             .Where(x => !string.IsNullOrWhiteSpace(x))
             .Select(x => x!)
@@ -143,7 +168,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             categories.Add(category);
         }
 
-        foreach (var item in selected)
+        foreach (var item in selectedLibraryRules)
         {
             MasterRule entity;
 
@@ -188,8 +213,58 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             entity.ModifiedUtc = DateTime.UtcNow;
         }
 
+        if (clientId.HasValue)
+        {
+            foreach (var item in selectedClientSpecificRules)
+            {
+                var entity = await db.ClientRules
+                    .SingleOrDefaultAsync(
+                        x => x.ClientId == clientId.Value && x.Name == item.Name,
+                        cancellationToken);
+
+                if (entity is null)
+                {
+                    entity = new ClientRule
+                    {
+                        ClientId = clientId.Value,
+                        SourceImportKey = item.Name
+                    };
+                    db.ClientRules.Add(entity);
+                    clientSpecificAdded++;
+                }
+                else
+                {
+                    clientSpecificUpdated++;
+                }
+
+                entity.Name = item.Name;
+                entity.Direction = item.Direction;
+                entity.TransactionType = item.TransactionType;
+                entity.CategoryName = item.CategoryName;
+                entity.CategoryId = null;
+                entity.Payee = null;
+                entity.MatchAllConditions = item.MatchAllConditions;
+                entity.AutoAdd = item.AutoAdd;
+                entity.Conditions = item.Conditions.Select(x => new RuleCondition
+                {
+                    Field = x.Field,
+                    Operator = x.Operator,
+                    Value = x.Value
+                }).ToList();
+                entity.OriginalConditionsJson = item.OriginalConditionsJson;
+                entity.OriginalOutputsJson = item.OriginalOutputsJson;
+                entity.IsAccountSpecific = true;
+                entity.IsReadOnlyImport = true;
+                entity.ModifiedUtc = DateTime.UtcNow;
+            }
+        }
+
         await db.SaveChangesAsync(cancellationToken);
-        return (added, updated);
+        return new RuleImportApplyResult(
+            added,
+            updated,
+            clientSpecificAdded,
+            clientSpecificUpdated);
     }
 
     private static List<RuleImportPreviewItem> ParseWorkbook(Stream stream)
@@ -377,6 +452,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
         }
 
         var transactionType = ResolveTransactionType(direction, transactionCode, reasons);
+        var isAccountSpecific = transactionCode == 64;
 
         return new RuleImportPreviewItem
         {
@@ -390,7 +466,8 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             MatchAllConditions = matchAllConditions,
             OriginalConditionsJson = NullIfWhiteSpace(conditionsJson),
             OriginalOutputsJson = NullIfWhiteSpace(outputsJson),
-            IsReadOnlyImport = reasons.Count > 0,
+            IsAccountSpecific = isAccountSpecific,
+            IsReadOnlyImport = isAccountSpecific || reasons.Count > 0,
             UnsupportedReason = reasons.Count == 0 ? null : string.Join(" ", reasons.Distinct()),
             Status = reasons.Count == 0 ? RuleImportStatus.New : RuleImportStatus.Unsupported
         };
