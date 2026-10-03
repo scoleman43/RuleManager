@@ -103,7 +103,14 @@ public sealed class ClientRuleAssignment : Entity
     public Guid MasterRuleId { get; set; }
     public Guid? ClientRuleId { get; set; }
     public RuleAssignmentStatus Status { get; set; } = RuleAssignmentStatus.Inherited;
+    public bool IsExplicit { get; set; }
     public RuleOverride? Override { get; set; }
+}
+
+public sealed class ClientRuleSetAssignment : Entity
+{
+    public Guid ClientId { get; set; }
+    public Guid RuleSetId { get; set; }
 }
 
 public sealed class RuleOverride : Entity
