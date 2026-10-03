@@ -93,3 +93,12 @@ h1:focus {
     color: #41464b;
     border: 1px solid #adb5bd;
 }
+
+
+.rule-actions {
+    white-space: nowrap;
+}
+
+.rule-actions .btn {
+    white-space: nowrap;
+}
