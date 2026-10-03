@@ -55,13 +55,29 @@
 
                 <div class="col-md-6">
                     <label class="form-label">Category</label>
-                    <select class="form-select" @bind="categoryId">
-                        <option value="">-- Select category --</option>
-                        @foreach (var category in categories.Where(x => x.IsActive))
-                        {
-                            <option value="@category.Id">@category.Name</option>
-                        }
-                    </select>
+                    <div class="input-group">
+                        <select class="form-select" @bind="categoryId">
+                            <option value="">-- Select category --</option>
+                            @foreach (var category in categories.Where(x => x.IsActive))
+                            {
+                                <option value="@category.Id">@category.Name</option>
+                            }
+                        </select>
+                        <button class="btn btn-outline-secondary" type="button" @onclick="ToggleCategoryCreator">
+                            @(showCategoryCreator ? "Cancel" : "New Category")
+                        </button>
+                    </div>
+
+                    @if (showCategoryCreator)
+                    {
+                        <div class="mt-2">
+                            <div class="input-group">
+                                <input class="form-control" @bind="newCategoryName" placeholder="Example: Auto:Insurance" />
+                                <button class="btn btn-outline-primary" type="button" @onclick="CreateCategoryAsync">Create & Select</button>
+                            </div>
+                            <div class="form-text">Use a colon to separate main and subcategory names.</div>
+                        </div>
+                    }
                 </div>
 
                 <div class="col-md-6">
@@ -71,9 +87,9 @@
 
                 <div class="col-md-6">
                     <label class="form-label">Condition logic</label>
-                    <select class="form-select" @bind="matchAllConditions">
-                        <option value="true">Match all conditions</option>
-                        <option value="false">Match any condition</option>
+                    <select class="form-select" @bind="conditionLogic">
+                        <option value="all">Match all conditions</option>
+                        <option value="any">Match any condition</option>
                     </select>
                 </div>
 
@@ -214,11 +230,13 @@
     private RuleTransactionType transactionType = RuleTransactionType.Expense;
     private string categoryId = string.Empty;
     private string payee = string.Empty;
-    private bool matchAllConditions = true;
+    private string conditionLogic = "all";
     private bool autoAdd;
     private bool showEditor;
     private bool isError;
     private string? message;
+    private bool showCategoryCreator;
+    private string newCategoryName = string.Empty;
 
     private IReadOnlyList<RuleTransactionType> AllowedTransactionTypes =>
         MasterRulePolicy.GetAllowedTransactionTypes(direction);
@@ -257,8 +275,10 @@
         transactionType = RuleTransactionType.Expense;
         categoryId = string.Empty;
         payee = string.Empty;
-        matchAllConditions = true;
+        conditionLogic = "all";
         autoAdd = false;
+        showCategoryCreator = false;
+        newCategoryName = string.Empty;
         conditions.Clear();
         conditions.Add(NewCondition());
         showEditor = true;
@@ -274,8 +294,10 @@
         transactionType = rule.TransactionType;
         categoryId = rule.CategoryId?.ToString() ?? string.Empty;
         payee = rule.Payee ?? string.Empty;
-        matchAllConditions = rule.MatchAllConditions;
+        conditionLogic = rule.MatchAllConditions ? "all" : "any";
         autoAdd = rule.AutoAdd;
+        showCategoryCreator = false;
+        newCategoryName = string.Empty;
         conditions.Clear();
         conditions.AddRange(rule.Conditions.Select(x => new RuleCondition
         {
@@ -296,7 +318,77 @@
     {
         showEditor = false;
         editId = null;
+        showCategoryCreator = false;
+        newCategoryName = string.Empty;
         conditions.Clear();
+    }
+
+    private void ToggleCategoryCreator()
+    {
+        showCategoryCreator = !showCategoryCreator;
+        if (!showCategoryCreator)
+            newCategoryName = string.Empty;
+    }
+
+    private async Task CreateCategoryAsync()
+    {
+        string normalized;
+        try
+        {
+            normalized = CategoryName.Normalize(newCategoryName);
+        }
+        catch (ArgumentException ex)
+        {
+            SetError(ex.Message);
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var existing = await db.Categories.FirstOrDefaultAsync(x =>
+            x.OrganizationId == organizationId &&
+            x.Name.ToLower() == normalized.ToLower());
+
+        if (existing is not null)
+        {
+            if (!existing.IsActive)
+            {
+                existing.IsActive = true;
+                existing.ModifiedUtc = DateTime.UtcNow;
+                await db.SaveChangesAsync();
+            }
+
+            categoryId = existing.Id.ToString();
+        }
+        else
+        {
+            var category = new Category
+            {
+                OrganizationId = organizationId,
+                Name = normalized
+            };
+
+            db.Categories.Add(category);
+            await db.SaveChangesAsync();
+            categoryId = category.Id.ToString();
+        }
+
+        await ReloadCategoriesAsync();
+        showCategoryCreator = false;
+        newCategoryName = string.Empty;
+        isError = false;
+        message = $"Category '{normalized}' is ready and selected.";
+    }
+
+    private async Task ReloadCategoriesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        categories.Clear();
+        categories.AddRange(await db.Categories
+            .Where(x => x.OrganizationId == organizationId)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
     }
 
     private void AddCondition() => conditions.Add(NewCondition());
@@ -388,7 +480,7 @@
         entity.CategoryId = selectedCategoryId;
         entity.CategoryName = selectedCategoryName;
         entity.Payee = NullIfWhiteSpace(payee);
-        entity.MatchAllConditions = matchAllConditions;
+        entity.MatchAllConditions = conditionLogic == "all";
         entity.AutoAdd = autoAdd;
         entity.IsAccountSpecific = false;
         entity.IsReadOnlyImport = false;
