@@ -566,12 +566,23 @@ else
 
         if (assignment is null)
         {
+            var assignmentMax = await db.ClientRuleAssignments
+                .Where(x => x.ClientId == ClientId)
+                .Select(x => (int?)x.ExportPriority)
+                .MaxAsync() ?? 0;
+
+            var clientRuleMax = await db.ClientRules
+                .Where(x => x.ClientId == ClientId)
+                .Select(x => (int?)x.ExportPriority)
+                .MaxAsync() ?? 0;
+
             db.ClientRuleAssignments.Add(new ClientRuleAssignment
             {
                 ClientId = ClientId,
                 MasterRuleId = ruleId,
                 Status = RuleAssignmentStatus.Inherited,
-                IsExplicit = true
+                IsExplicit = true,
+                ExportPriority = Math.Max(assignmentMax, clientRuleMax) + 1
             });
         }
         else
