@@ -2,7 +2,6 @@
 @rendermode InteractiveServer
 @using Microsoft.EntityFrameworkCore
 @using RuleManager.Core.Domain
-@using RuleManager.Core.Rules
 @using RuleManager.Data
 @using RuleManager.Data.Services
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
@@ -21,7 +20,7 @@ else
         <div>
             <button class="btn btn-link p-0 mb-2" @onclick="BackToClients">← Back to Clients</button>
             <h1>@client.Name</h1>
-            <p class="text-muted mb-0">Choose Rule Sets for this client, then manage individual exceptions.</p>
+            <p class="text-muted mb-0">Manage the Rule Sets and individual rules assigned to this client.</p>
         </div>
     </div>
 
@@ -30,58 +29,198 @@ else
         <div class="alert alert-success">@message</div>
     }
 
-    <div class="card mb-4">
-        <div class="card-body">
-            <h5 class="card-title">Rule Sets</h5>
-            <p class="text-muted">A new client starts with no Rule Sets selected. Selecting a set adds its Master Rules as inherited rules.</p>
-
-            @if (ruleSets.Count == 0)
-            {
-                <div class="text-muted">No active Rule Sets exist yet.</div>
-            }
-            else
-            {
-                <div class="row g-2">
-                    @foreach (var set in ruleSets)
-                    {
-                        var setId = set.Id;
-                        var selected = assignedRuleSetIds.Contains(setId);
-                        <div class="col-md-6 col-lg-4">
-                            <div class="border rounded p-2 h-100">
-                                <div class="form-check">
-                                    <input class="form-check-input"
-                                           type="checkbox"
-                                           checked="@selected"
-                                           @onchange="e => ToggleRuleSetAsync(setId, e)" />
-                                    <label class="form-check-label">
-                                        <strong>@set.Name</strong>
-                                        @if (!string.IsNullOrWhiteSpace(set.Description))
-                                        {
-                                            <div class="small text-muted">@set.Description</div>
-                                        }
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    }
-                </div>
-            }
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted">Rule Sets</div>
+                <div class="display-6">@assignedRuleSetIds.Count</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted">Assigned Rules</div>
+                <div class="display-6">@AssignedRules.Count()</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted">From Rule Sets</div>
+                <div class="display-6">@SetRuleCount</div>
+            </div></div>
+        </div>
+        <div class="col-md-3">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted">Direct Rules</div>
+                <div class="display-6">@DirectRuleCount</div>
+            </div></div>
         </div>
     </div>
 
-    <div class="row g-3 mb-4">
-        <div class="col-md"><div class="card h-100"><div class="card-body"><div class="text-muted">Expected Rules</div><div class="display-6">@summary.Total</div></div></div></div>
-        <div class="col-md"><div class="card h-100"><div class="card-body"><div class="text-muted">Inherited</div><div class="display-6">@summary.Inherited</div></div></div></div>
-        <div class="col-md"><div class="card h-100"><div class="card-body"><div class="text-muted">Overridden</div><div class="display-6">@summary.Overridden</div></div></div></div>
-        <div class="col-md"><div class="card h-100"><div class="card-body"><div class="text-muted">Missing</div><div class="display-6">@summary.Missing</div></div></div></div>
-        <div class="col-md"><div class="card h-100"><div class="card-body"><div class="text-muted">Conflict</div><div class="display-6">@summary.Conflict</div></div></div></div>
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <div>
+                    <h5 class="card-title mb-1">Assigned Rule Sets</h5>
+                    <div class="text-muted small">Rule Sets automatically keep this client up to date when rules are added to the set.</div>
+                </div>
+            </div>
+
+            @if (AssignedRuleSets.Any())
+            {
+                <div class="table-responsive mb-3">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Rule Set</th>
+                                <th>Description</th>
+                                <th class="text-end">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var set in AssignedRuleSets)
+                            {
+                                <tr>
+                                    <td><strong>@set.Name</strong></td>
+                                    <td>@(set.Description ?? "—")</td>
+                                    <td class="text-end">
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveRuleSetAsync(set.Id)">Remove</button>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+            else
+            {
+                <div class="text-muted mb-3">No Rule Sets are assigned to this client.</div>
+            }
+
+            <div class="row g-3 align-items-end">
+                <div class="col-lg-5">
+                    <label class="form-label">Find Rule Set</label>
+                    <input class="form-control"
+                           @bind="ruleSetSearchText"
+                           @bind:event="oninput"
+                           placeholder="Start typing a Rule Set name..." />
+                </div>
+                <div class="col-lg-5">
+                    <label class="form-label">Rule Set</label>
+                    <select class="form-select" @bind="selectedRuleSetId">
+                        <option value="">-- Select Rule Set --</option>
+                        @foreach (var set in AvailableRuleSetOptions)
+                        {
+                            <option value="@set.Id">@set.Name</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-lg-2">
+                    <button class="btn btn-primary w-100" @onclick="AddRuleSetAsync">Add Rule Set</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (showDirectRulePicker)
+    {
+        <div class="card mb-4 border-primary">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-3">
+                    <div>
+                        <h5 class="card-title mb-1">Add Direct Rule</h5>
+                        <div class="text-muted">Use this for a one-off rule that should apply to this client outside of its Rule Sets.</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="CloseDirectRulePicker">Close</button>
+                </div>
+
+                <div class="row g-3 align-items-end">
+                    <div class="col-lg-5">
+                        <label class="form-label">Find Rule</label>
+                        <input class="form-control"
+                               @bind="directRuleSearchText"
+                               @bind:event="oninput"
+                               placeholder="Start typing a rule name..." />
+                    </div>
+                    <div class="col-lg-5">
+                        <label class="form-label">Rule</label>
+                        <select class="form-select" @bind="selectedDirectRuleId">
+                            <option value="">-- Select Rule --</option>
+                            @foreach (var rule in DirectRuleOptions)
+                            {
+                                <option value="@rule.Id">@rule.Name — @(rule.CategoryName ?? "No category")</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-lg-2">
+                        <button class="btn btn-primary w-100" @onclick="AddDirectRuleAsync">Add</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <h4 class="mb-1">Assigned Rules</h4>
+            <div class="text-muted small">Only rules currently assigned through a Rule Set or directly are shown.</div>
+        </div>
+        <button class="btn btn-outline-primary" @onclick="OpenDirectRulePicker">Add Direct Rule</button>
+    </div>
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-lg-4">
+                    <label class="form-label">Search</label>
+                    <input class="form-control"
+                           @bind="ruleSearchText"
+                           @bind:event="oninput"
+                           placeholder="Rule name, category, payee, or condition..." />
+                </div>
+                <div class="col-md-4 col-lg-3">
+                    <label class="form-label">Source</label>
+                    <select class="form-select" @bind="sourceFilter">
+                        <option value="all">All Assigned Rules</option>
+                        <option value="set">Rule Set</option>
+                        <option value="direct">Direct</option>
+                        <option value="both">Rule Set + Direct</option>
+                    </select>
+                </div>
+                <div class="col-md-4 col-lg-2">
+                    <label class="form-label">Direction</label>
+                    <select class="form-select" @bind="directionFilter">
+                        <option value="all">All</option>
+                        <option value="out">Money out</option>
+                        <option value="in">Money in</option>
+                    </select>
+                </div>
+                <div class="col-md-4 col-lg-3">
+                    <label class="form-label">Category</label>
+                    <select class="form-select" @bind="categoryFilter">
+                        <option value="all">All</option>
+                        <option value="none">No category</option>
+                        @foreach (var category in categoryNames)
+                        {
+                            <option value="@category">@category</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mt-3">
+                <div class="text-muted small">Showing @FilteredAssignedRules.Count() of @AssignedRules.Count() assigned rule(s)</div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ClearRuleFilters">Clear Filters</button>
+            </div>
+        </div>
     </div>
 
     <div class="card">
         <div class="card-body p-0">
-            @if (masterRules.Count == 0)
+            @if (!FilteredAssignedRules.Any())
             {
-                <div class="p-4 text-muted">No active master rules exist yet.</div>
+                <div class="p-4 text-muted">
+                    @(AssignedRules.Any() ? "No assigned rules match the current search and filters." : "This client does not have any rules assigned yet.")
+                </div>
             }
             else
             {
@@ -89,75 +228,52 @@ else
                     <table class="table table-hover mb-0 align-middle">
                         <thead>
                             <tr>
-                                <th>Master Rule</th>
+                                <th>Rule</th>
                                 <th>Source</th>
+                                <th>Direction</th>
                                 <th>Transaction</th>
                                 <th>Category</th>
-                                <th>Assignment</th>
-                                <th>Status</th>
+                                <th class="text-end">Action</th>
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var rule in masterRules)
+                            @foreach (var rule in FilteredAssignedRules)
                             {
                                 var assignment = AssignmentFor(rule.Id);
-                                var expectedBySet = expectedFromRuleSets.Contains(rule.Id);
-                                <tr class="@(!expectedBySet && assignment is null ? "text-muted" : null)">
+                                var fromSet = expectedFromRuleSets.Contains(rule.Id);
+                                var direct = assignment?.IsExplicit == true;
+
+                                <tr>
                                     <td>
                                         <strong>@rule.Name</strong>
-                                        <div class="small text-muted">@(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")</div>
+                                        @if (!string.IsNullOrWhiteSpace(rule.Payee))
+                                        {
+                                            <div class="small text-muted">Payee: @rule.Payee</div>
+                                        }
                                     </td>
                                     <td>
-                                        @if (expectedBySet)
+                                        @if (fromSet)
                                         {
-                                            <span class="badge text-bg-primary">Rule Set</span>
+                                            <span class="badge rule-source-set me-1">@RuleSetSourceText(rule.Id)</span>
                                         }
-                                        else if (assignment?.IsExplicit == true)
+                                        @if (direct)
                                         {
-                                            <span class="badge text-bg-secondary">Individual</span>
-                                        }
-                                        else
-                                        {
-                                            <span class="text-muted">Not selected</span>
+                                            <span class="badge rule-source-direct">Direct</span>
                                         }
                                     </td>
+                                    <td>@(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")</td>
                                     <td>@FormatTransactionType(rule.TransactionType)</td>
                                     <td>@(rule.CategoryName ?? "—")</td>
-                                    <td>
-                                        @if (assignment is null)
+                                    <td class="text-end">
+                                        @if (direct)
                                         {
-                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => AssignExplicitAsync(rule.Id)">Assign Individually</button>
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveDirectAssignmentAsync(assignment!.Id)">
+                                                Remove Direct
+                                            </button>
                                         }
-                                        else if (expectedBySet && !assignment.IsExplicit)
+                                        else
                                         {
                                             <span class="small text-muted">Managed by Rule Set</span>
-                                        }
-                                        else
-                                        {
-                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveExplicitAssignmentAsync(assignment.Id)">Remove</button>
-                                        }
-                                    </td>
-                                    <td>
-                                        @if (assignment is null)
-                                        {
-                                            @if (expectedBySet)
-                                            {
-                                                <span class="badge text-bg-warning">Missing</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="text-muted">—</span>
-                                            }
-                                        }
-                                        else
-                                        {
-                                            <select class="form-select form-select-sm" style="min-width: 140px"
-                                                    value="@assignment.Status"
-                                                    @onchange="e => ChangeStatusAsync(assignment.Id, e)">
-                                                <option value="@RuleAssignmentStatus.Inherited">Inherited</option>
-                                                <option value="@RuleAssignmentStatus.Overridden">Overridden</option>
-                                                <option value="@RuleAssignmentStatus.Conflict">Conflict</option>
-                                            </select>
                                         }
                                     </td>
                                 </tr>
@@ -176,11 +292,57 @@ else
     private Client? client;
     private readonly List<MasterRule> masterRules = new();
     private readonly List<RuleSet> ruleSets = new();
+    private readonly List<RuleSetRule> ruleSetRules = new();
     private readonly List<ClientRuleAssignment> assignments = new();
     private readonly HashSet<Guid> assignedRuleSetIds = new();
     private readonly HashSet<Guid> expectedFromRuleSets = new();
-    private ConsistencySummary summary = new(0, 0, 0, 0, 0);
+    private readonly List<string> categoryNames = new();
+
     private string? message;
+
+    private string ruleSetSearchText = string.Empty;
+    private string selectedRuleSetId = string.Empty;
+
+    private bool showDirectRulePicker;
+    private string directRuleSearchText = string.Empty;
+    private string selectedDirectRuleId = string.Empty;
+
+    private string ruleSearchText = string.Empty;
+    private string sourceFilter = "all";
+    private string directionFilter = "all";
+    private string categoryFilter = "all";
+
+    private IEnumerable<RuleSet> AssignedRuleSets =>
+        ruleSets.Where(x => assignedRuleSetIds.Contains(x.Id));
+
+    private IEnumerable<RuleSet> AvailableRuleSetOptions =>
+        ruleSets.Where(set =>
+            !assignedRuleSetIds.Contains(set.Id)
+            && (string.IsNullOrWhiteSpace(ruleSetSearchText)
+                || set.Name.Contains(ruleSetSearchText.Trim(), StringComparison.OrdinalIgnoreCase)));
+
+    private IEnumerable<MasterRule> AssignedRules =>
+        masterRules.Where(rule =>
+            expectedFromRuleSets.Contains(rule.Id)
+            || AssignmentFor(rule.Id)?.IsExplicit == true);
+
+    private IEnumerable<MasterRule> FilteredAssignedRules =>
+        AssignedRules.Where(rule =>
+            MatchesRuleSearch(rule)
+            && MatchesSource(rule)
+            && MatchesDirection(rule)
+            && MatchesCategory(rule));
+
+    private IEnumerable<MasterRule> DirectRuleOptions =>
+        masterRules.Where(rule =>
+            AssignmentFor(rule.Id)?.IsExplicit != true
+            && (string.IsNullOrWhiteSpace(directRuleSearchText)
+                || rule.Name.Contains(directRuleSearchText.Trim(), StringComparison.OrdinalIgnoreCase)
+                || (rule.CategoryName?.Contains(directRuleSearchText.Trim(), StringComparison.OrdinalIgnoreCase) ?? false)
+                || (rule.Payee?.Contains(directRuleSearchText.Trim(), StringComparison.OrdinalIgnoreCase) ?? false)));
+
+    private int SetRuleCount => AssignedRules.Count(x => expectedFromRuleSets.Contains(x.Id));
+    private int DirectRuleCount => AssignedRules.Count(x => AssignmentFor(x.Id)?.IsExplicit == true);
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
@@ -218,18 +380,19 @@ else
             assignedRuleSetIds.Add(id);
         }
 
-        expectedFromRuleSets.Clear();
-        if (assignedRuleSetIds.Count > 0)
+        ruleSetRules.Clear();
+        var assignedSetIds = assignedRuleSetIds.ToArray();
+        if (assignedSetIds.Length > 0)
         {
-            foreach (var id in await db.RuleSetRules
-                .Where(x => assignedRuleSetIds.Contains(x.RuleSetId))
-                .Select(x => x.MasterRuleId)
-                .Distinct()
-                .ToListAsync())
-            {
-                expectedFromRuleSets.Add(id);
-            }
+            ruleSetRules.AddRange(await db.RuleSetRules
+                .Where(x => assignedSetIds.Contains(x.RuleSetId))
+                .AsNoTracking()
+                .ToListAsync());
         }
+
+        expectedFromRuleSets.Clear();
+        foreach (var id in ruleSetRules.Select(x => x.MasterRuleId).Distinct())
+            expectedFromRuleSets.Add(id);
 
         assignments.Clear();
         assignments.AddRange(await db.ClientRuleAssignments
@@ -237,12 +400,13 @@ else
             .AsNoTracking()
             .ToListAsync());
 
-        var expectedIds = expectedFromRuleSets
-            .Concat(assignments.Where(x => x.IsExplicit).Select(x => x.MasterRuleId))
-            .Distinct()
-            .ToArray();
-
-        summary = ConsistencyCalculator.Calculate(expectedIds, assignments);
+        categoryNames.Clear();
+        categoryNames.AddRange(AssignedRules
+            .Select(x => x.CategoryName)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x));
     }
 
     private void BackToClients() => Navigation.NavigateTo("/clients");
@@ -250,37 +414,91 @@ else
     private ClientRuleAssignment? AssignmentFor(Guid masterRuleId) =>
         assignments.FirstOrDefault(x => x.MasterRuleId == masterRuleId);
 
-    private async Task ToggleRuleSetAsync(Guid ruleSetId, ChangeEventArgs e)
+    private async Task AddRuleSetAsync()
     {
-        var selected = e.Value is bool value && value;
+        Guid ruleSetId;
 
-        if (selected)
+        if (Guid.TryParse(selectedRuleSetId, out var selectedId))
         {
-            await RuleSetAssignments.AssignRuleSetToClientAsync(ClientId, ruleSetId);
-            message = "Rule Set assigned. Its rules are now inherited by this client.";
+            ruleSetId = selectedId;
         }
         else
         {
-            await RuleSetAssignments.RemoveRuleSetFromClientAsync(ClientId, ruleSetId);
-            message = "Rule Set removed. Rules only required by that set were removed.";
+            var matches = AvailableRuleSetOptions.ToList();
+            if (matches.Count != 1)
+            {
+                message = matches.Count == 0
+                    ? "Enter a Rule Set name or choose one from the dropdown."
+                    : "More than one Rule Set matches. Choose the Rule Set from the dropdown.";
+                return;
+            }
+
+            ruleSetId = matches[0].Id;
         }
 
+        await RuleSetAssignments.AssignRuleSetToClientAsync(ClientId, ruleSetId);
+        var setName = ruleSets.First(x => x.Id == ruleSetId).Name;
+        message = $"Rule Set '{setName}' assigned.";
+        ruleSetSearchText = string.Empty;
+        selectedRuleSetId = string.Empty;
         await LoadAsync();
     }
 
-    private async Task AssignExplicitAsync(Guid masterRuleId)
+    private async Task RemoveRuleSetAsync(Guid ruleSetId)
     {
+        var setName = ruleSets.First(x => x.Id == ruleSetId).Name;
+        await RuleSetAssignments.RemoveRuleSetFromClientAsync(ClientId, ruleSetId);
+        message = $"Rule Set '{setName}' removed.";
+        await LoadAsync();
+    }
+
+    private void OpenDirectRulePicker()
+    {
+        showDirectRulePicker = true;
+        directRuleSearchText = string.Empty;
+        selectedDirectRuleId = string.Empty;
+    }
+
+    private void CloseDirectRulePicker()
+    {
+        showDirectRulePicker = false;
+        directRuleSearchText = string.Empty;
+        selectedDirectRuleId = string.Empty;
+    }
+
+    private async Task AddDirectRuleAsync()
+    {
+        Guid ruleId;
+
+        if (Guid.TryParse(selectedDirectRuleId, out var selectedId))
+        {
+            ruleId = selectedId;
+        }
+        else
+        {
+            var matches = DirectRuleOptions.ToList();
+            if (matches.Count != 1)
+            {
+                message = matches.Count == 0
+                    ? "Enter a rule name or choose one from the dropdown."
+                    : "More than one rule matches. Choose the rule from the dropdown.";
+                return;
+            }
+
+            ruleId = matches[0].Id;
+        }
+
         await using var db = await DbFactory.CreateDbContextAsync();
 
         var assignment = await db.ClientRuleAssignments
-            .SingleOrDefaultAsync(x => x.ClientId == ClientId && x.MasterRuleId == masterRuleId);
+            .SingleOrDefaultAsync(x => x.ClientId == ClientId && x.MasterRuleId == ruleId);
 
         if (assignment is null)
         {
             db.ClientRuleAssignments.Add(new ClientRuleAssignment
             {
                 ClientId = ClientId,
-                MasterRuleId = masterRuleId,
+                MasterRuleId = ruleId,
                 Status = RuleAssignmentStatus.Inherited,
                 IsExplicit = true
             });
@@ -292,11 +510,15 @@ else
         }
 
         await db.SaveChangesAsync();
-        message = "Master rule assigned individually.";
+        var ruleName = masterRules.First(x => x.Id == ruleId).Name;
+        message = $"Rule '{ruleName}' assigned directly.";
+        showDirectRulePicker = false;
+        directRuleSearchText = string.Empty;
+        selectedDirectRuleId = string.Empty;
         await LoadAsync();
     }
 
-    private async Task RemoveExplicitAssignmentAsync(Guid assignmentId)
+    private async Task RemoveDirectAssignmentAsync(Guid assignmentId)
     {
         await using var db = await DbFactory.CreateDbContextAsync();
         var assignment = await db.ClientRuleAssignments.SingleAsync(x => x.Id == assignmentId);
@@ -305,32 +527,76 @@ else
         {
             assignment.IsExplicit = false;
             assignment.ModifiedUtc = DateTime.UtcNow;
-            message = "Individual assignment removed. The rule remains because it is required by a selected Rule Set.";
+            message = "Direct assignment removed. The rule remains because it is included in an assigned Rule Set.";
         }
         else
         {
             db.ClientRuleAssignments.Remove(assignment);
-            message = "Individual assignment removed.";
+            message = "Direct rule removed.";
         }
 
         await db.SaveChangesAsync();
         await LoadAsync();
     }
 
-    private async Task ChangeStatusAsync(Guid assignmentId, ChangeEventArgs e)
+    private bool MatchesRuleSearch(MasterRule rule)
     {
-        if (!Enum.TryParse<RuleAssignmentStatus>(e.Value?.ToString(), out var status) ||
-            status is RuleAssignmentStatus.Missing or RuleAssignmentStatus.Unmanaged)
-            return;
+        if (string.IsNullOrWhiteSpace(ruleSearchText))
+            return true;
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var assignment = await db.ClientRuleAssignments.SingleAsync(x => x.Id == assignmentId);
-        assignment.Status = status;
-        assignment.ModifiedUtc = DateTime.UtcNow;
-        await db.SaveChangesAsync();
+        var term = ruleSearchText.Trim();
+        return rule.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || (rule.CategoryName?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (rule.Payee?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || rule.Conditions.Any(x => x.Value.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
 
-        message = $"Rule status changed to {status}.";
-        await LoadAsync();
+    private bool MatchesSource(MasterRule rule)
+    {
+        var fromSet = expectedFromRuleSets.Contains(rule.Id);
+        var direct = AssignmentFor(rule.Id)?.IsExplicit == true;
+
+        return sourceFilter switch
+        {
+            "set" => fromSet && !direct,
+            "direct" => direct && !fromSet,
+            "both" => fromSet && direct,
+            _ => true
+        };
+    }
+
+    private bool MatchesDirection(MasterRule rule) => directionFilter switch
+    {
+        "out" => rule.Direction == RuleDirection.MoneyOut,
+        "in" => rule.Direction == RuleDirection.MoneyIn,
+        _ => true
+    };
+
+    private bool MatchesCategory(MasterRule rule) => categoryFilter switch
+    {
+        "all" => true,
+        "none" => string.IsNullOrWhiteSpace(rule.CategoryName),
+        _ => string.Equals(rule.CategoryName, categoryFilter, StringComparison.OrdinalIgnoreCase)
+    };
+
+    private void ClearRuleFilters()
+    {
+        ruleSearchText = string.Empty;
+        sourceFilter = "all";
+        directionFilter = "all";
+        categoryFilter = "all";
+    }
+
+    private string RuleSetSourceText(Guid masterRuleId)
+    {
+        var names = ruleSetRules
+            .Where(x => x.MasterRuleId == masterRuleId)
+            .Join(ruleSets, x => x.RuleSetId, x => x.Id, (_, set) => set.Name)
+            .Distinct()
+            .OrderBy(x => x)
+            .ToArray();
+
+        return names.Length == 0 ? "Rule Set" : string.Join(", ", names);
     }
 
     private static string FormatTransactionType(RuleTransactionType type) => type switch
