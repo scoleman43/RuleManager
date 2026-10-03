@@ -6,6 +6,7 @@
 @using RuleManager.Data.Services
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject WorkspaceService Workspace
+@inject NavigationManager Navigation
 
 <PageTitle>Clients</PageTitle>
 
@@ -87,6 +88,10 @@
                                     </span>
                                 </td>
                                 <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-success me-2"
+                                            @onclick="() => Navigation.NavigateTo($"/clients/{client.Id}/rules")">
+                                        Rules
+                                    </button>
                                     <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => BeginEdit(client)">Edit</button>
                                     <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(client)">
                                         @(client.IsActive ? "Deactivate" : "Activate")
