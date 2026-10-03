@@ -1,18 +1,233 @@
 @page "/"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using RuleManager.Data
+@using RuleManager.Data.Services
+@inject IDbContextFactory<RuleManagerDbContext> DbFactory
+@inject WorkspaceService Workspace
+@inject NavigationManager Navigation
 
 <PageTitle>Dashboard</PageTitle>
 
 <h1>Dashboard</h1>
-<p class="text-muted">Centralized rule management across all QuickBooks clients.</p>
+<p class="text-muted">Overview of the shared rule library and client rule coverage.</p>
 
 <div class="row g-3 mt-2">
-    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Clients</div><div class="display-6">0</div></div></div></div>
-    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Master Rules</div><div class="display-6">0</div></div></div></div>
-    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Rule Sets</div><div class="display-6">0</div></div></div></div>
-    <div class="col-md-3"><div class="card h-100"><div class="card-body"><div class="text-muted">Consistency Issues</div><div class="display-6">0</div></div></div></div>
+    <div class="col-md-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted">Active Clients</div>
+                <div class="display-6">@activeClientCount</div>
+                <button class="btn btn-link p-0 mt-2" @onclick='() => Navigation.NavigateTo("/clients")'>View clients</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted">Reusable Rules</div>
+                <div class="display-6">@activeRuleCount</div>
+                <button class="btn btn-link p-0 mt-2" @onclick='() => Navigation.NavigateTo("/rules")'>View rules</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted">Rule Sets</div>
+                <div class="display-6">@activeRuleSetCount</div>
+                <button class="btn btn-link p-0 mt-2" @onclick='() => Navigation.NavigateTo("/rule-sets")'>View Rule Sets</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6 col-xl-3">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted">Client-Specific Rules</div>
+                <div class="display-6">@clientSpecificRuleCount</div>
+                <div class="small text-muted mt-2">Imported rules tied to individual QuickBooks clients.</div>
+            </div>
+        </div>
+    </div>
 </div>
 
-<div class="card mt-4"><div class="card-body">
-    <h5 class="card-title">Web 1.0 foundation</h5>
-    <p class="mb-0">The first release focuses on clients, master rules, rule sets, categories, imports/exports, and consistency management.</p>
-</div></div>
+<div class="row g-3 mt-1">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted">Clients With Rule Sets</div>
+                <div class="display-6">@clientsWithRuleSets</div>
+                <div class="small text-muted">@Percent(clientsWithRuleSets, activeClientCount)% of active clients</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted">Clients With Direct Rules</div>
+                <div class="display-6">@clientsWithDirectRules</div>
+                <div class="small text-muted">Clients with at least one one-off reusable rule assignment.</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="text-muted">Clients With No Rules</div>
+                <div class="display-6">@clientsWithNoRules</div>
+                <div class="small text-muted">Active clients with no Rule Set, direct rule, or client-specific imported rule.</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3 mt-1">
+    <div class="col-lg-7">
+        <div class="card h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <div>
+                        <h5 class="card-title mb-1">Clients Needing Setup</h5>
+                        <div class="text-muted small">Active clients that currently have no rules configured.</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary" @onclick='() => Navigation.NavigateTo("/consistency")'>View Consistency</button>
+                </div>
+
+                @if (unconfiguredClients.Count == 0)
+                {
+                    <div class="text-muted">All active clients currently have at least one rule source.</div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Client</th>
+                                    <th>QuickBooks Company</th>
+                                    <th class="text-end">Action</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var client in unconfiguredClients.Take(10))
+                                {
+                                    <tr>
+                                        <td><strong>@client.Name</strong></td>
+                                        <td>@(client.QuickBooksCompanyName ?? "—")</td>
+                                        <td class="text-end">
+                                            <button class="btn btn-sm btn-outline-primary"
+                                                    @onclick='() => Navigation.NavigateTo($"/clients/{client.Id}/rules")'>
+                                                Configure
+                                            </button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    @if (unconfiguredClients.Count > 10)
+                    {
+                        <div class="small text-muted mt-2">
+                            Showing 10 of @unconfiguredClients.Count clients needing setup.
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">Quick Actions</h5>
+                <p class="text-muted small">Common RuleManager workflows.</p>
+
+                <div class="d-grid gap-2">
+                    <button class="btn btn-outline-primary" @onclick='() => Navigation.NavigateTo("/clients")'>Add or Manage Clients</button>
+                    <button class="btn btn-outline-primary" @onclick='() => Navigation.NavigateTo("/rules/new")'>Create Reusable Rule</button>
+                    <button class="btn btn-outline-primary" @onclick='() => Navigation.NavigateTo("/rule-sets/new")'>Create Rule Set</button>
+                    <button class="btn btn-outline-primary" @onclick='() => Navigation.NavigateTo("/imports-exports")'>Import / Export Rules</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private int activeClientCount;
+    private int activeRuleCount;
+    private int activeRuleSetCount;
+    private int clientSpecificRuleCount;
+    private int clientsWithRuleSets;
+    private int clientsWithDirectRules;
+    private int clientsWithNoRules;
+
+    private readonly List<RuleManager.Core.Domain.Client> unconfiguredClients = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var activeClients = await db.Clients
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .AsNoTracking()
+            .ToListAsync();
+
+        activeClientCount = activeClients.Count;
+
+        activeRuleCount = await db.MasterRules
+            .CountAsync(x => x.OrganizationId == organizationId && x.IsActive);
+
+        activeRuleSetCount = await db.RuleSets
+            .CountAsync(x => x.OrganizationId == organizationId && x.IsActive);
+
+        var clientIds = activeClients.Select(x => x.Id).ToArray();
+
+        clientSpecificRuleCount = await db.ClientRules
+            .CountAsync(x => clientIds.Contains(x.ClientId) && x.IsAccountSpecific);
+
+        var clientsWithSetsIds = await db.ClientRuleSetAssignments
+            .Where(x => clientIds.Contains(x.ClientId))
+            .Select(x => x.ClientId)
+            .Distinct()
+            .ToListAsync();
+
+        var clientsWithDirectIds = await db.ClientRuleAssignments
+            .Where(x => clientIds.Contains(x.ClientId) && x.IsExplicit)
+            .Select(x => x.ClientId)
+            .Distinct()
+            .ToListAsync();
+
+        var clientsWithClientSpecificIds = await db.ClientRules
+            .Where(x => clientIds.Contains(x.ClientId) && x.IsAccountSpecific)
+            .Select(x => x.ClientId)
+            .Distinct()
+            .ToListAsync();
+
+        clientsWithRuleSets = clientsWithSetsIds.Count;
+        clientsWithDirectRules = clientsWithDirectIds.Count;
+
+        var configuredClientIds = clientsWithSetsIds
+            .Concat(clientsWithDirectIds)
+            .Concat(clientsWithClientSpecificIds)
+            .ToHashSet();
+
+        unconfiguredClients.Clear();
+        unconfiguredClients.AddRange(activeClients
+            .Where(x => !configuredClientIds.Contains(x.Id))
+            .OrderBy(x => x.Name));
+
+        clientsWithNoRules = unconfiguredClients.Count;
+    }
+
+    private static int Percent(int value, int total) =>
+        total == 0 ? 0 : (int)Math.Round(value * 100d / total);
+}
