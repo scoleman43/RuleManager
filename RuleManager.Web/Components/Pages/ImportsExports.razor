@@ -2,13 +2,16 @@
 @rendermode InteractiveServer
 @using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
 @using RuleManager.Core.Domain
 @using RuleManager.Data
 @using RuleManager.Data.Services
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject WorkspaceService Workspace
 @inject QuickBooksRuleImportService ImportService
+@inject QuickBooksRuleExportService ExportService
 @inject RuleSetAssignmentService RuleSetAssignments
+@inject IJSRuntime JS
 
 <PageTitle>Imports / Exports</PageTitle>
 
@@ -307,9 +310,24 @@
                 </div>
 
                 <div class="col-lg-4">
-                    <button class="btn btn-primary w-100" @onclick="StartExportAsync">Prepare Export</button>
+                    <button class="btn btn-primary w-100" @onclick="StartExportAsync" disabled="@isExportBusy">
+                        @(isExportBusy ? "Generating..." : "Generate & Download")
+                    </button>
                 </div>
             </div>
+
+            @if (exportErrors.Count > 0)
+            {
+                <div class="alert alert-warning mt-3 mb-0">
+                    <strong>The export was not generated because these rules need attention:</strong>
+                    <ul class="mb-0 mt-2">
+                        @foreach (var error in exportErrors)
+                        {
+                            <li>@error</li>
+                        }
+                    </ul>
+                </div>
+            }
         </div>
     </div>
 }
@@ -326,6 +344,8 @@
     private bool showImportReview;
     private bool showExport;
     private bool isImportBusy;
+    private bool isExportBusy;
+    private readonly List<string> exportErrors = new();
     private string importClientId = string.Empty;
     private string exportClientId = string.Empty;
     private string? importFileName;
@@ -389,6 +409,7 @@
         showExport = true;
         showImport = false;
         showImportReview = false;
+        exportErrors.Clear();
         message = null;
     }
 
@@ -396,6 +417,7 @@
     {
         showExport = false;
         exportClientId = string.Empty;
+        exportErrors.Clear();
     }
 
     private async Task HandleImportFileAsync(InputFileChangeEventArgs e)
@@ -613,16 +635,48 @@
             message = null;
     }
 
-    private Task StartExportAsync()
+    private async Task StartExportAsync()
     {
-        if (!Guid.TryParse(exportClientId, out _))
+        exportErrors.Clear();
+
+        if (!Guid.TryParse(exportClientId, out var clientId))
         {
             message = "Select the client you want to export.";
-            return Task.CompletedTask;
+            return;
         }
 
-        message = "Export workflow is ready. The next implementation step is generating the QuickBooks-compatible .xls workbook from this client's effective rules.";
-        return Task.CompletedTask;
+        isExportBusy = true;
+        message = null;
+
+        try
+        {
+            var result = await ExportService.GenerateClientExportAsync(clientId);
+
+            if (!result.Success || result.Content is null || string.IsNullOrWhiteSpace(result.FileName))
+            {
+                exportErrors.AddRange(result.Errors);
+                message = "The export could not be generated.";
+                return;
+            }
+
+            using var stream = new MemoryStream(result.Content, writable: false);
+            using var streamRef = new DotNetStreamReference(stream);
+
+            await JS.InvokeVoidAsync(
+                "downloadFileFromStream",
+                result.FileName,
+                streamRef);
+
+            message = $"Export generated with {result.RuleCount} rule(s).";
+        }
+        catch (Exception ex)
+        {
+            message = $"Export failed: {ex.Message}";
+        }
+        finally
+        {
+            isExportBusy = false;
+        }
     }
 
     private static string ImportStatusClass(RuleImportStatus status) => status switch
