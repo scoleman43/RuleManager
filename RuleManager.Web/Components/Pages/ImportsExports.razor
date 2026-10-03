@@ -11,7 +11,7 @@
 <PageTitle>Imports / Exports</PageTitle>
 
 <h1>Imports / Exports</h1>
-<p class="text-muted">Import existing QuickBooks rule files and generate client-specific rule exports.</p>
+<p class="text-muted">Bulk import rules into the shared rule library, optionally compare them to a client, and generate client-specific exports.</p>
 
 @if (!string.IsNullOrWhiteSpace(message))
 {
@@ -23,7 +23,7 @@
         <div class="card h-100">
             <div class="card-body">
                 <h5>Import</h5>
-                <p class="text-muted">Upload an exported QuickBooks rule workbook for a selected client.</p>
+                <p class="text-muted">Bulk add new rules to the rule library or update existing rules from a QuickBooks export.</p>
                 <button class="btn btn-outline-primary" @onclick="OpenImport">Import Rules</button>
             </div>
         </div>
@@ -47,28 +47,44 @@
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <div>
                     <h5 class="card-title mb-1">Import Rules</h5>
-                    <div class="text-muted">Choose the client and the QuickBooks .xls rule export.</div>
+                    <div class="text-muted">Import rules into the shared rule library. A client is only needed if you want to compare the import to that client's current assigned rules.</div>
                 </div>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="CloseImport">Close</button>
             </div>
 
             <div class="row g-3">
-                <div class="col-lg-6">
-                    <label class="form-label">Client</label>
-                    <select class="form-select" @bind="importClientId">
-                        <option value="">-- Select client --</option>
-                        @foreach (var client in clients)
-                        {
-                            <option value="@client.Id">@client.Name</option>
-                        }
-                    </select>
-                </div>
-
-                <div class="col-lg-6">
+                <div class="col-lg-12">
                     <label class="form-label">QuickBooks rule file</label>
                     <InputFile class="form-control" OnChange="HandleImportFile" accept=".xls" />
                     <div class="form-text">Use the .xls file exported from QuickBooks Online.</div>
                 </div>
+            </div>
+
+            <div class="border rounded p-3 mt-3">
+                <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           @bind="compareToClient"
+                           id="compareToClient" />
+                    <label class="form-check-label" for="compareToClient">
+                        Compare these imported rules to a client's current assigned rules
+                    </label>
+                </div>
+
+                @if (compareToClient)
+                {
+                    <div class="mt-3">
+                        <label class="form-label">Client</label>
+                        <select class="form-select" @bind="importClientId">
+                            <option value="">-- Select client --</option>
+                            @foreach (var client in clients)
+                            {
+                                <option value="@client.Id">@client.Name</option>
+                            }
+                        </select>
+                        <div class="form-text">This does not assign the imported rules to the client. It only enables comparison during review.</div>
+                    </div>
+                }
             </div>
 
             @if (!string.IsNullOrWhiteSpace(importFileName))
@@ -86,14 +102,14 @@
                 <div class="form-check">
                     <input class="form-check-input"
                            type="checkbox"
-                           @bind="assignRuleSetAfterImport"
-                           id="assignRuleSetAfterImport" />
-                    <label class="form-check-label" for="assignRuleSetAfterImport">
-                        Automatically assign this client to a Rule Set after the import is completed
+                           @bind="addImportedRulesToRuleSet"
+                           id="addImportedRulesToRuleSet" />
+                    <label class="form-check-label" for="addImportedRulesToRuleSet">
+                        Automatically add imported rules to a Rule Set
                     </label>
                 </div>
 
-                @if (assignRuleSetAfterImport)
+                @if (addImportedRulesToRuleSet)
                 {
                     <div class="row g-3 mt-1">
                         <div class="col-lg-6">
@@ -117,7 +133,7 @@
                     </div>
 
                     <div class="form-text mt-2">
-                        The Rule Set will be applied only after the import is successfully reviewed and completed.
+                        New rules created by the import, and existing rules updated by the import, can be associated with this Rule Set after review.
                     </div>
                 }
             </div>
@@ -171,7 +187,8 @@
     private string exportClientId = string.Empty;
     private string? importFileName;
     private long importFileSize;
-    private bool assignRuleSetAfterImport;
+    private bool compareToClient;
+    private bool addImportedRulesToRuleSet;
     private string ruleSetSearchText = string.Empty;
     private string importRuleSetId = string.Empty;
     private string? message;
@@ -207,7 +224,8 @@
         importClientId = string.Empty;
         importFileName = null;
         importFileSize = 0;
-        assignRuleSetAfterImport = false;
+        compareToClient = false;
+        addImportedRulesToRuleSet = false;
         ruleSetSearchText = string.Empty;
         importRuleSetId = string.Empty;
     }
@@ -244,9 +262,9 @@
 
     private Task StartImportAsync()
     {
-        if (!Guid.TryParse(importClientId, out _))
+        if (compareToClient && !Guid.TryParse(importClientId, out _))
         {
-            message = "Select the client you want to import rules for.";
+            message = "Select the client you want to compare against.";
             return Task.CompletedTask;
         }
 
@@ -262,7 +280,7 @@
             return Task.CompletedTask;
         }
 
-        if (assignRuleSetAfterImport && !Guid.TryParse(importRuleSetId, out _))
+        if (addImportedRulesToRuleSet && !Guid.TryParse(importRuleSetId, out _))
         {
             var matches = ImportRuleSetOptions.ToList();
 
@@ -277,11 +295,17 @@
             }
         }
 
-        var groupMessage = assignRuleSetAfterImport
-            ? " The selected Rule Set will be assigned to the client after the import is successfully reviewed and completed."
+        var comparisonMessage = compareToClient
+            ? " The review will also compare the imported rules to the selected client's current assigned rules without assigning anything to that client."
             : string.Empty;
 
-        message = "Import workflow is ready. The next implementation step is parsing the QuickBooks workbook, comparing its rules, and presenting the review screen before anything is saved." + groupMessage;
+        var groupMessage = addImportedRulesToRuleSet
+            ? " Imported rules will be associated with the selected Rule Set after review."
+            : string.Empty;
+
+        message = "Import workflow is ready for bulk add/update of the shared rule library. The next implementation step is parsing the QuickBooks workbook, matching imported rules to existing rules, and presenting new/changed/duplicate rules for review before anything is saved."
+            + comparisonMessage
+            + groupMessage;
         return Task.CompletedTask;
     }
 
