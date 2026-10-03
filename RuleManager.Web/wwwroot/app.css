@@ -360,3 +360,82 @@ a:hover, .btn-link:hover {
     border-radius: 0.85rem;
     box-shadow: 0 2px 10px rgba(24, 49, 29, 0.04);
 }
+
+
+.rule-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1050;
+    background: rgba(16, 43, 23, 0.42);
+    backdrop-filter: blur(2px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.25rem;
+}
+
+.rule-modal-dialog {
+    width: min(760px, 100%);
+    max-height: calc(100vh - 2.5rem);
+    overflow: auto;
+    background: #fff;
+    border: 1px solid var(--rm-border);
+    border-radius: 1rem;
+    box-shadow: 0 24px 70px rgba(16, 43, 23, 0.28);
+}
+
+.rule-modal-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 1.25rem 1.35rem 1rem;
+    border-bottom: 1px solid var(--rm-border);
+}
+
+.rule-modal-eyebrow {
+    color: var(--rm-green-dark);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 0.68rem;
+    font-weight: 800;
+    margin-bottom: 0.3rem;
+}
+
+.rule-modal-body {
+    padding: 1.35rem;
+}
+
+.rule-modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.65rem;
+    padding: 1rem 1.35rem 1.25rem;
+    border-top: 1px solid var(--rm-border);
+    background: #fbfcfb;
+    border-radius: 0 0 1rem 1rem;
+}
+
+@media (max-width: 640.98px) {
+    .rule-modal-backdrop {
+        align-items: flex-end;
+        padding: 0.75rem;
+    }
+
+    .rule-modal-dialog {
+        max-height: 90vh;
+        border-radius: 1rem;
+    }
+
+    .rule-modal-header {
+        padding: 1rem;
+    }
+
+    .rule-modal-body {
+        padding: 1rem;
+    }
+
+    .rule-modal-footer {
+        padding: 0.9rem 1rem 1rem;
+    }
+}
