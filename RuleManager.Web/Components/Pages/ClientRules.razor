@@ -1,0 +1,230 @@
+@page "/clients/{ClientId:guid}/rules"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using RuleManager.Core.Domain
+@using RuleManager.Core.Rules
+@using RuleManager.Data
+@inject IDbContextFactory<RuleManagerDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Client Rules</PageTitle>
+
+@if (client is null)
+{
+    <p>Loading client...</p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+            <button class="btn btn-link p-0 mb-2" @onclick="() => Navigation.NavigateTo("/clients")">← Back to Clients</button>
+            <h1>@client.Name</h1>
+            <p class="text-muted mb-0">Assign master rules and review this client's consistency.</p>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="alert alert-success">@message</div>
+    }
+
+    <div class="row g-3 mb-4">
+        <div class="col-md">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted">Master Rules</div>
+                <div class="display-6">@summary.Total</div>
+            </div></div>
+        </div>
+        <div class="col-md">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted">Inherited</div>
+                <div class="display-6">@summary.Inherited</div>
+            </div></div>
+        </div>
+        <div class="col-md">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted">Overridden</div>
+                <div class="display-6">@summary.Overridden</div>
+            </div></div>
+        </div>
+        <div class="col-md">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted">Missing</div>
+                <div class="display-6">@summary.Missing</div>
+            </div></div>
+        </div>
+        <div class="col-md">
+            <div class="card h-100"><div class="card-body">
+                <div class="text-muted">Conflict</div>
+                <div class="display-6">@summary.Conflict</div>
+            </div></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body p-0">
+            @if (masterRules.Count == 0)
+            {
+                <div class="p-4 text-muted">No active master rules exist yet.</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th>Master Rule</th>
+                                <th>Transaction</th>
+                                <th>Category</th>
+                                <th>Assignment</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var rule in masterRules)
+                            {
+                                var assignment = AssignmentFor(rule.Id);
+                                <tr>
+                                    <td>
+                                        <strong>@rule.Name</strong>
+                                        <div class="small text-muted">
+                                            @(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")
+                                        </div>
+                                    </td>
+                                    <td>@FormatTransactionType(rule.TransactionType)</td>
+                                    <td>@(rule.CategoryName ?? "—")</td>
+                                    <td>
+                                        @if (assignment is null)
+                                        {
+                                            <button class="btn btn-sm btn-primary" @onclick="() => AssignAsync(rule.Id)">Assign</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveAssignmentAsync(assignment.Id)">Remove</button>
+                                        }
+                                    </td>
+                                    <td>
+                                        @if (assignment is null)
+                                        {
+                                            <span class="badge text-bg-warning">Missing</span>
+                                        }
+                                        else
+                                        {
+                                            <select class="form-select form-select-sm" style="min-width: 140px"
+                                                    value="@assignment.Status"
+                                                    @onchange="e => ChangeStatusAsync(assignment.Id, e)">
+                                                <option value="@RuleAssignmentStatus.Inherited">Inherited</option>
+                                                <option value="@RuleAssignmentStatus.Overridden">Overridden</option>
+                                                <option value="@RuleAssignmentStatus.Conflict">Conflict</option>
+                                            </select>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid ClientId { get; set; }
+
+    private Client? client;
+    private readonly List<MasterRule> masterRules = new();
+    private readonly List<ClientRuleAssignment> assignments = new();
+    private ConsistencySummary summary = new(0, 0, 0, 0, 0);
+    private string? message;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        client = await db.Clients.AsNoTracking().SingleOrDefaultAsync(x => x.Id == ClientId);
+        if (client is null)
+        {
+            Navigation.NavigateTo("/clients");
+            return;
+        }
+
+        masterRules.Clear();
+        masterRules.AddRange(await db.MasterRules
+            .Where(x => x.OrganizationId == client.OrganizationId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+
+        assignments.Clear();
+        assignments.AddRange(await db.ClientRuleAssignments
+            .Where(x => x.ClientId == ClientId)
+            .AsNoTracking()
+            .ToListAsync());
+
+        summary = ConsistencyCalculator.Calculate(masterRules.Select(x => x.Id), assignments);
+    }
+
+    private ClientRuleAssignment? AssignmentFor(Guid masterRuleId) =>
+        assignments.FirstOrDefault(x => x.MasterRuleId == masterRuleId);
+
+    private async Task AssignAsync(Guid masterRuleId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var exists = await db.ClientRuleAssignments.AnyAsync(x =>
+            x.ClientId == ClientId && x.MasterRuleId == masterRuleId);
+
+        if (!exists)
+        {
+            db.ClientRuleAssignments.Add(new ClientRuleAssignment
+            {
+                ClientId = ClientId,
+                MasterRuleId = masterRuleId,
+                Status = RuleAssignmentStatus.Inherited
+            });
+            await db.SaveChangesAsync();
+        }
+
+        message = "Master rule assigned.";
+        await LoadAsync();
+    }
+
+    private async Task RemoveAssignmentAsync(Guid assignmentId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var assignment = await db.ClientRuleAssignments.SingleAsync(x => x.Id == assignmentId);
+        db.ClientRuleAssignments.Remove(assignment);
+        await db.SaveChangesAsync();
+
+        message = "Assignment removed. The rule is now missing for this client.";
+        await LoadAsync();
+    }
+
+    private async Task ChangeStatusAsync(Guid assignmentId, ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<RuleAssignmentStatus>(e.Value?.ToString(), out var status) ||
+            status is RuleAssignmentStatus.Missing or RuleAssignmentStatus.Unmanaged)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var assignment = await db.ClientRuleAssignments.SingleAsync(x => x.Id == assignmentId);
+        assignment.Status = status;
+        assignment.ModifiedUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+
+        message = $"Rule status changed to {status}.";
+        await LoadAsync();
+    }
+
+    private static string FormatTransactionType(RuleTransactionType type) => type switch
+    {
+        RuleTransactionType.CreditCardPayment => "Credit card payment",
+        _ => string.Concat(type.ToString().Select((c, i) => i > 0 && char.IsUpper(c) ? " " + c : c.ToString()))
+    };
+}
