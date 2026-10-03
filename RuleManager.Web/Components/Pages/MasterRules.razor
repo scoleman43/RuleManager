@@ -94,9 +94,18 @@
                 </div>
 
                 <div class="col-md-6 d-flex align-items-end">
-                    <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" @bind="autoAdd" id="autoAddRule" />
-                        <label class="form-check-label" for="autoAddRule">Auto-add matching transactions</label>
+                    <div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" @bind="autoAdd" id="autoAddRule" />
+                            <label class="form-check-label" for="autoAddRule">Auto-add matching transactions</label>
+                        </div>
+                        @if (!editId.HasValue)
+                        {
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" @bind="assignToAllActiveClients" id="assignAllClients" />
+                                <label class="form-check-label" for="assignAllClients">Assign this rule to all active clients</label>
+                            </div>
+                        }
                     </div>
                 </div>
             </div>
@@ -159,6 +168,61 @@
     </div>
 }
 
+@if (batchRule is not null)
+{
+    <div class="card mb-4 border-primary">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h5 class="card-title mb-1">Assign "@batchRule.Name"</h5>
+                    <div class="text-muted">Existing assignments are skipped automatically.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseBatchAssign">Close</button>
+            </div>
+
+            <div class="d-flex gap-2 mb-3">
+                <button class="btn btn-primary" @onclick="AssignBatchToAllActiveAsync">Assign to All Active Clients</button>
+                <button class="btn btn-outline-primary" @onclick="AssignBatchToSelectedAsync" disabled="@(selectedClientIds.Count == 0)">
+                    Assign to Selected (@selectedClientIds.Count)
+                </button>
+            </div>
+
+            @if (activeClients.Count == 0)
+            {
+                <div class="text-muted">No active clients are available.</div>
+            }
+            else
+            {
+                <div class="row g-2">
+                    @foreach (var client in activeClients)
+                    {
+                        var clientId = client.Id;
+                        var alreadyAssigned = batchAssignedClientIds.Contains(clientId);
+                        <div class="col-md-6 col-lg-4">
+                            <div class="border rounded p-2">
+                                <div class="form-check">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           checked="@selectedClientIds.Contains(clientId)"
+                                           disabled="@alreadyAssigned"
+                                           @onchange="e => ToggleSelectedClient(clientId, e)" />
+                                    <label class="form-check-label">
+                                        @client.Name
+                                        @if (alreadyAssigned)
+                                        {
+                                            <span class="badge text-bg-success ms-1">Assigned</span>
+                                        }
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
 <div class="card">
     <div class="card-body p-0">
         @if (rules.Count == 0)
@@ -204,6 +268,7 @@
                                     </span>
                                 </td>
                                 <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-success me-2" @onclick="() => OpenBatchAssignAsync(rule)">Assign</button>
                                     <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => BeginEdit(rule)">Edit</button>
                                     <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(rule)">
                                         @(rule.IsActive ? "Deactivate" : "Activate")
@@ -232,11 +297,17 @@
     private string payee = string.Empty;
     private string conditionLogic = "all";
     private bool autoAdd;
+    private bool assignToAllActiveClients = true;
     private bool showEditor;
     private bool isError;
     private string? message;
     private bool showCategoryCreator;
     private string newCategoryName = string.Empty;
+
+    private MasterRule? batchRule;
+    private readonly List<Client> activeClients = new();
+    private readonly HashSet<Guid> selectedClientIds = new();
+    private readonly HashSet<Guid> batchAssignedClientIds = new();
 
     private IReadOnlyList<RuleTransactionType> AllowedTransactionTypes =>
         MasterRulePolicy.GetAllowedTransactionTypes(direction);
@@ -277,6 +348,7 @@
         payee = string.Empty;
         conditionLogic = "all";
         autoAdd = false;
+        assignToAllActiveClients = true;
         showCategoryCreator = false;
         newCategoryName = string.Empty;
         conditions.Clear();
@@ -296,6 +368,7 @@
         payee = rule.Payee ?? string.Empty;
         conditionLogic = rule.MatchAllConditions ? "all" : "any";
         autoAdd = rule.AutoAdd;
+        assignToAllActiveClients = false;
         showCategoryCreator = false;
         newCategoryName = string.Empty;
         conditions.Clear();
@@ -460,6 +533,8 @@
 
         await using var db = await DbFactory.CreateDbContextAsync();
 
+        var isNewRule = !editId.HasValue;
+
         MasterRule entity;
         if (editId.HasValue)
         {
@@ -494,12 +569,129 @@
 
         await db.SaveChangesAsync();
 
+        var assignedCount = 0;
+        if (isNewRule && assignToAllActiveClients)
+        {
+            assignedCount = await AssignRuleToClientsAsync(db, entity.Id, null);
+        }
+
         showEditor = false;
         editId = null;
         conditions.Clear();
         isError = false;
-        message = "Master rule saved.";
+        message = assignedCount > 0
+            ? $"Master rule saved and assigned to {assignedCount} active client(s)."
+            : "Master rule saved.";
         await LoadAsync();
+    }
+
+    private async Task OpenBatchAssignAsync(MasterRule rule)
+    {
+        batchRule = rule;
+        selectedClientIds.Clear();
+        batchAssignedClientIds.Clear();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        activeClients.Clear();
+        activeClients.AddRange(await db.Clients
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+
+        var assignedIds = await db.ClientRuleAssignments
+            .Where(x => x.MasterRuleId == rule.Id)
+            .Select(x => x.ClientId)
+            .ToListAsync();
+
+        foreach (var id in assignedIds)
+            batchAssignedClientIds.Add(id);
+    }
+
+    private void CloseBatchAssign()
+    {
+        batchRule = null;
+        activeClients.Clear();
+        selectedClientIds.Clear();
+        batchAssignedClientIds.Clear();
+    }
+
+    private void ToggleSelectedClient(Guid clientId, ChangeEventArgs e)
+    {
+        if (e.Value is bool isChecked && isChecked)
+            selectedClientIds.Add(clientId);
+        else
+            selectedClientIds.Remove(clientId);
+    }
+
+    private async Task AssignBatchToAllActiveAsync()
+    {
+        if (batchRule is null)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var assigned = await AssignRuleToClientsAsync(db, batchRule.Id, null);
+
+        message = assigned == 0
+            ? "All active clients already have this rule assigned."
+            : $"Rule assigned to {assigned} additional active client(s).";
+        isError = false;
+        await OpenBatchAssignAsync(batchRule);
+    }
+
+    private async Task AssignBatchToSelectedAsync()
+    {
+        if (batchRule is null || selectedClientIds.Count == 0)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var assigned = await AssignRuleToClientsAsync(db, batchRule.Id, selectedClientIds);
+
+        message = assigned == 0
+            ? "The selected clients already have this rule assigned."
+            : $"Rule assigned to {assigned} selected client(s).";
+        isError = false;
+        await OpenBatchAssignAsync(batchRule);
+    }
+
+    private async Task<int> AssignRuleToClientsAsync(
+        RuleManagerDbContext db,
+        Guid masterRuleId,
+        IReadOnlyCollection<Guid>? selectedIds)
+    {
+        var clientQuery = db.Clients
+            .Where(x => x.OrganizationId == organizationId && x.IsActive);
+
+        if (selectedIds is not null)
+            clientQuery = clientQuery.Where(x => selectedIds.Contains(x.Id));
+
+        var clientIds = await clientQuery.Select(x => x.Id).ToListAsync();
+        if (clientIds.Count == 0)
+            return 0;
+
+        var existingClientIds = await db.ClientRuleAssignments
+            .Where(x => x.MasterRuleId == masterRuleId && clientIds.Contains(x.ClientId))
+            .Select(x => x.ClientId)
+            .ToListAsync();
+
+        var existing = existingClientIds.ToHashSet();
+        var missingIds = clientIds.Where(x => !existing.Contains(x)).ToList();
+
+        foreach (var clientId in missingIds)
+        {
+            db.ClientRuleAssignments.Add(new ClientRuleAssignment
+            {
+                ClientId = clientId,
+                MasterRuleId = masterRuleId,
+                Status = RuleAssignmentStatus.Inherited
+            });
+        }
+
+        if (missingIds.Count > 0)
+            await db.SaveChangesAsync();
+
+        return missingIds.Count;
     }
 
     private async Task ToggleActiveAsync(MasterRule rule)
