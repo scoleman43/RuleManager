@@ -7,6 +7,8 @@
 @using RuleManager.Data.Services
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject WorkspaceService Workspace
+@inject QuickBooksRuleImportService ImportService
+@inject RuleSetAssignmentService RuleSetAssignments
 
 <PageTitle>Imports / Exports</PageTitle>
 
@@ -55,7 +57,7 @@
             <div class="row g-3">
                 <div class="col-lg-12">
                     <label class="form-label">QuickBooks rule file</label>
-                    <InputFile class="form-control" OnChange="HandleImportFile" accept=".xls" />
+                    <InputFile class="form-control" OnChange="HandleImportFileAsync" accept=".xls" />
                     <div class="form-text">Use the .xls file exported from QuickBooks Online.</div>
                 </div>
             </div>
@@ -133,13 +135,148 @@
                     </div>
 
                     <div class="form-text mt-2">
-                        New rules created by the import, and existing rules updated by the import, can be associated with this Rule Set after review.
+                        Supported imported rules will be associated with this Rule Set after you approve the import.
                     </div>
                 }
             </div>
 
             <div class="mt-3">
-                <button class="btn btn-primary" @onclick="StartImportAsync">Continue Import</button>
+                <button class="btn btn-primary" @onclick="StartImportAsync" disabled="@isImportBusy">
+                    @(isImportBusy ? "Reading File..." : "Continue Import")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showImportReview)
+{
+    <div class="card mb-4 border-primary">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h5 class="card-title mb-1">Review Import</h5>
+                    <div class="text-muted">Review what will be added or updated before anything is written to the rule library.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CancelImportReview">Cancel Review</button>
+            </div>
+
+            <div class="row g-2 mb-3">
+                <div class="col-md">
+                    <div class="border rounded p-2"><strong>@CountStatus(RuleImportStatus.New)</strong> New</div>
+                </div>
+                <div class="col-md">
+                    <div class="border rounded p-2"><strong>@CountStatus(RuleImportStatus.Changed)</strong> Changed</div>
+                </div>
+                <div class="col-md">
+                    <div class="border rounded p-2"><strong>@CountStatus(RuleImportStatus.Unchanged)</strong> Unchanged</div>
+                </div>
+                <div class="col-md">
+                    <div class="border rounded p-2"><strong>@CountStatus(RuleImportStatus.Duplicate)</strong> Duplicate</div>
+                </div>
+                <div class="col-md">
+                    <div class="border rounded p-2"><strong>@CountStatus(RuleImportStatus.Unsupported)</strong> Unsupported</div>
+                </div>
+            </div>
+
+            <div class="row g-3 mb-3">
+                <div class="col-lg-6">
+                    <label class="form-label">Search</label>
+                    <input class="form-control"
+                           @bind="previewSearchText"
+                           @bind:event="oninput"
+                           placeholder="Rule name or category..." />
+                </div>
+                <div class="col-lg-3">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" @bind="previewStatusFilter">
+                        <option value="all">All</option>
+                        <option value="@RuleImportStatus.New">New</option>
+                        <option value="@RuleImportStatus.Changed">Changed</option>
+                        <option value="@RuleImportStatus.Unchanged">Unchanged</option>
+                        <option value="@RuleImportStatus.Duplicate">Duplicate</option>
+                        <option value="@RuleImportStatus.Unsupported">Unsupported</option>
+                    </select>
+                </div>
+                <div class="col-lg-3 d-flex align-items-end">
+                    <button class="btn btn-outline-secondary w-100" @onclick="ClearPreviewFilters">Clear Filters</button>
+                </div>
+            </div>
+
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th style="width:70px">Import</th>
+                            <th>Rule</th>
+                            <th>Status</th>
+                            <th>Direction</th>
+                            <th>Transaction</th>
+                            <th>Category</th>
+                            @if (compareToClient)
+                            {
+                                <th>Client Comparison</th>
+                            }
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var item in FilteredPreviewItems)
+                        {
+                            var selectable = item.Status is RuleImportStatus.New or RuleImportStatus.Changed;
+                            <tr>
+                                <td>
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           @bind="item.Selected"
+                                           disabled="@(!selectable)" />
+                                </td>
+                                <td>
+                                    <strong>@item.Name</strong>
+                                    <div class="small text-muted">Row @item.RowNumber</div>
+                                </td>
+                                <td><span class="@ImportStatusClass(item.Status)">@item.Status</span></td>
+                                <td>@(item.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")</td>
+                                <td>@FormatTransactionType(item.TransactionType)</td>
+                                <td>@(item.CategoryName ?? "—")</td>
+                                @if (compareToClient)
+                                {
+                                    <td>@(item.ClientComparison ?? "—")</td>
+                                }
+                                <td>
+                                    @if (!string.IsNullOrWhiteSpace(item.UnsupportedReason))
+                                    {
+                                        <span class="small">@item.UnsupportedReason</span>
+                                    }
+                                    else if (item.Status == RuleImportStatus.Changed)
+                                    {
+                                        <span class="small text-muted">Existing rule with the same name will be updated.</span>
+                                    }
+                                    else if (item.Status == RuleImportStatus.Unchanged)
+                                    {
+                                        <span class="small text-muted">Already matches the rule library.</span>
+                                    }
+                                    else if (item.Status == RuleImportStatus.Duplicate)
+                                    {
+                                        <span class="small text-muted">The import file contains this rule name more than once.</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mt-3">
+                <div class="text-muted small">
+                    @previewItems.Count(x => x.Selected) rule(s) selected for add/update.
+                </div>
+                <div class="d-flex gap-2">
+                    <button class="btn btn-outline-secondary" @onclick="CancelImportReview">Back</button>
+                    <button class="btn btn-primary" @onclick="CommitImportAsync" disabled="@(isImportBusy || previewItems.Count(x => x.Selected) == 0)">
+                        @(isImportBusy ? "Importing..." : "Import Selected Rules")
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -178,24 +315,45 @@
 }
 
 @code {
+    private const long MaxImportFileSize = 20 * 1024 * 1024;
+
+    private Guid organizationId;
     private readonly List<Client> clients = new();
     private readonly List<RuleSet> ruleSets = new();
+    private readonly List<RuleImportPreviewItem> previewItems = new();
 
     private bool showImport;
+    private bool showImportReview;
     private bool showExport;
+    private bool isImportBusy;
     private string importClientId = string.Empty;
     private string exportClientId = string.Empty;
     private string? importFileName;
     private long importFileSize;
+    private byte[]? importFileBytes;
     private bool compareToClient;
     private bool addImportedRulesToRuleSet;
     private string ruleSetSearchText = string.Empty;
     private string importRuleSetId = string.Empty;
+    private string previewSearchText = string.Empty;
+    private string previewStatusFilter = "all";
     private string? message;
+
+    private IEnumerable<RuleSet> ImportRuleSetOptions =>
+        ruleSets.Where(set =>
+            string.IsNullOrWhiteSpace(ruleSetSearchText)
+            || set.Name.Contains(ruleSetSearchText.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private IEnumerable<RuleImportPreviewItem> FilteredPreviewItems =>
+        previewItems.Where(item =>
+            (string.IsNullOrWhiteSpace(previewSearchText)
+             || item.Name.Contains(previewSearchText.Trim(), StringComparison.OrdinalIgnoreCase)
+             || (item.CategoryName?.Contains(previewSearchText.Trim(), StringComparison.OrdinalIgnoreCase) ?? false))
+            && (previewStatusFilter == "all" || item.Status.ToString() == previewStatusFilter));
 
     protected override async Task OnInitializedAsync()
     {
-        var organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
+        organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
 
         await using var db = await DbFactory.CreateDbContextAsync();
         clients.AddRange(await db.Clients
@@ -215,25 +373,22 @@
     {
         showImport = true;
         showExport = false;
+        showImportReview = false;
         message = null;
     }
 
     private void CloseImport()
     {
         showImport = false;
-        importClientId = string.Empty;
-        importFileName = null;
-        importFileSize = 0;
-        compareToClient = false;
-        addImportedRulesToRuleSet = false;
-        ruleSetSearchText = string.Empty;
-        importRuleSetId = string.Empty;
+        showImportReview = false;
+        ResetImportState();
     }
 
     private void OpenExport()
     {
         showExport = true;
         showImport = false;
+        showImportReview = false;
         message = null;
     }
 
@@ -243,70 +398,219 @@
         exportClientId = string.Empty;
     }
 
-    private void HandleImportFile(InputFileChangeEventArgs e)
+    private async Task HandleImportFileAsync(InputFileChangeEventArgs e)
     {
         var file = e.File;
         importFileName = file.Name;
         importFileSize = file.Size;
+        importFileBytes = null;
+        previewItems.Clear();
+        showImportReview = false;
 
         if (!file.Name.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+        {
             message = "QuickBooks rule imports must use the .xls export format.";
-        else
+            return;
+        }
+
+        if (file.Size > MaxImportFileSize)
+        {
+            message = "The selected file is larger than the 20 MB import limit.";
+            return;
+        }
+
+        try
+        {
+            await using var source = file.OpenReadStream(MaxImportFileSize);
+            using var memory = new MemoryStream();
+            await source.CopyToAsync(memory);
+            importFileBytes = memory.ToArray();
             message = null;
+        }
+        catch (Exception ex)
+        {
+            message = $"The file could not be read: {ex.Message}";
+        }
     }
 
-    private IEnumerable<RuleSet> ImportRuleSetOptions =>
-        ruleSets.Where(set =>
-            string.IsNullOrWhiteSpace(ruleSetSearchText)
-            || set.Name.Contains(ruleSetSearchText.Trim(), StringComparison.OrdinalIgnoreCase));
-
-    private Task StartImportAsync()
+    private async Task StartImportAsync()
     {
         if (compareToClient && !Guid.TryParse(importClientId, out _))
         {
             message = "Select the client you want to compare against.";
-            return Task.CompletedTask;
+            return;
         }
 
-        if (string.IsNullOrWhiteSpace(importFileName))
+        if (importFileBytes is null || importFileBytes.Length == 0)
         {
             message = "Choose a QuickBooks .xls rule file.";
-            return Task.CompletedTask;
+            return;
         }
 
-        if (!importFileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+        if (addImportedRulesToRuleSet && !ResolveRuleSetSelection())
+            return;
+
+        isImportBusy = true;
+        message = null;
+
+        try
         {
-            message = "The selected file must be a QuickBooks .xls rule export.";
-            return Task.CompletedTask;
+            using var stream = new MemoryStream(importFileBytes, writable: false);
+            var items = await ImportService.AnalyzeAsync(organizationId, stream);
+
+            previewItems.Clear();
+            previewItems.AddRange(items);
+
+            if (compareToClient && Guid.TryParse(importClientId, out var clientId))
+                await AddClientComparisonAsync(clientId);
+
+            showImportReview = true;
+            showImport = false;
+
+            message = previewItems.Count == 0
+                ? "No rule rows were found in the workbook."
+                : $"Read {previewItems.Count} rule(s). Review the results below before importing.";
+        }
+        catch (Exception ex)
+        {
+            message = $"Import could not be analyzed: {ex.Message}";
+        }
+        finally
+        {
+            isImportBusy = false;
+        }
+    }
+
+    private async Task AddClientComparisonAsync(Guid clientId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var assignedRuleIds = await db.ClientRuleAssignments
+            .Where(x => x.ClientId == clientId)
+            .Select(x => x.MasterRuleId)
+            .ToListAsync();
+
+        var assigned = assignedRuleIds.ToHashSet();
+
+        foreach (var item in previewItems)
+        {
+            item.ClientComparison = item.ExistingRuleId.HasValue && assigned.Contains(item.ExistingRuleId.Value)
+                ? "Currently assigned"
+                : item.ExistingRuleId.HasValue
+                    ? "Not currently assigned"
+                    : "New rule — not currently assigned";
+        }
+    }
+
+    private async Task CommitImportAsync()
+    {
+        if (previewItems.Count(x => x.Selected) == 0)
+        {
+            message = "Select at least one New or Changed rule to import.";
+            return;
         }
 
-        if (addImportedRulesToRuleSet && !Guid.TryParse(importRuleSetId, out _))
-        {
-            var matches = ImportRuleSetOptions.ToList();
+        isImportBusy = true;
+        message = null;
 
-            if (matches.Count == 1)
-                importRuleSetId = matches[0].Id.ToString();
-            else
+        try
+        {
+            var result = await ImportService.ApplyAsync(organizationId, previewItems);
+            var groupedCount = 0;
+
+            if (addImportedRulesToRuleSet
+                && Guid.TryParse(importRuleSetId, out var ruleSetId))
             {
-                message = matches.Count == 0
-                    ? "Choose the Rule Set you want assigned after import."
-                    : "More than one Rule Set matches. Select the Rule Set from the dropdown.";
-                return Task.CompletedTask;
+                await using var db = await DbFactory.CreateDbContextAsync();
+
+                var importedNames = previewItems
+                    .Where(x => x.Status is RuleImportStatus.New or RuleImportStatus.Changed or RuleImportStatus.Unchanged)
+                    .Select(x => x.Name)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+
+                var ruleIds = await db.MasterRules
+                    .Where(x => x.OrganizationId == organizationId && importedNames.Contains(x.Name))
+                    .Select(x => x.Id)
+                    .ToListAsync();
+
+                foreach (var ruleId in ruleIds)
+                {
+                    await RuleSetAssignments.AddRuleToSetAsync(ruleSetId, ruleId);
+                    groupedCount++;
+                }
             }
+
+            message = $"Import complete: {result.Added} rule(s) added and {result.Updated} rule(s) updated."
+                + (addImportedRulesToRuleSet ? $" {groupedCount} supported imported rule(s) are associated with the selected Rule Set." : string.Empty);
+
+            showImportReview = false;
+            showImport = false;
+            ResetImportState(clearMessage: false);
+        }
+        catch (Exception ex)
+        {
+            message = $"Import failed before completion: {ex.Message}";
+        }
+        finally
+        {
+            isImportBusy = false;
+        }
+    }
+
+    private bool ResolveRuleSetSelection()
+    {
+        if (Guid.TryParse(importRuleSetId, out _))
+            return true;
+
+        var matches = ImportRuleSetOptions.ToList();
+        if (matches.Count == 1)
+        {
+            importRuleSetId = matches[0].Id.ToString();
+            return true;
         }
 
-        var comparisonMessage = compareToClient
-            ? " The review will also compare the imported rules to the selected client's current assigned rules without assigning anything to that client."
-            : string.Empty;
+        message = matches.Count == 0
+            ? "Choose the Rule Set you want the imported rules added to."
+            : "More than one Rule Set matches. Select the Rule Set from the dropdown.";
+        return false;
+    }
 
-        var groupMessage = addImportedRulesToRuleSet
-            ? " Imported rules will be associated with the selected Rule Set after review."
-            : string.Empty;
+    private void CancelImportReview()
+    {
+        showImportReview = false;
+        showImport = true;
+        previewItems.Clear();
+        previewSearchText = string.Empty;
+        previewStatusFilter = "all";
+        message = null;
+    }
 
-        message = "Import workflow is ready for bulk add/update of the shared rule library. The next implementation step is parsing the QuickBooks workbook, matching imported rules to existing rules, and presenting new/changed/duplicate rules for review before anything is saved."
-            + comparisonMessage
-            + groupMessage;
-        return Task.CompletedTask;
+    private int CountStatus(RuleImportStatus status) =>
+        previewItems.Count(x => x.Status == status);
+
+    private void ClearPreviewFilters()
+    {
+        previewSearchText = string.Empty;
+        previewStatusFilter = "all";
+    }
+
+    private void ResetImportState(bool clearMessage = true)
+    {
+        importClientId = string.Empty;
+        importFileName = null;
+        importFileSize = 0;
+        importFileBytes = null;
+        compareToClient = false;
+        addImportedRulesToRuleSet = false;
+        ruleSetSearchText = string.Empty;
+        importRuleSetId = string.Empty;
+        previewSearchText = string.Empty;
+        previewStatusFilter = "all";
+        previewItems.Clear();
+
+        if (clearMessage)
+            message = null;
     }
 
     private Task StartExportAsync()
@@ -320,6 +624,22 @@
         message = "Export workflow is ready. The next implementation step is generating the QuickBooks-compatible .xls workbook from this client's effective rules.";
         return Task.CompletedTask;
     }
+
+    private static string ImportStatusClass(RuleImportStatus status) => status switch
+    {
+        RuleImportStatus.New => "badge status-badge-active",
+        RuleImportStatus.Changed => "badge consistency-issues",
+        RuleImportStatus.Unchanged => "badge consistency-none",
+        RuleImportStatus.Duplicate => "badge consistency-issues",
+        RuleImportStatus.Unsupported => "badge bg-danger text-white",
+        _ => "badge consistency-none"
+    };
+
+    private static string FormatTransactionType(RuleTransactionType type) => type switch
+    {
+        RuleTransactionType.CreditCardPayment => "Credit card payment",
+        _ => string.Concat(type.ToString().Select((c, i) => i > 0 && char.IsUpper(c) ? " " + c : c.ToString()))
+    };
 
     private static string FormatFileSize(long bytes)
     {
