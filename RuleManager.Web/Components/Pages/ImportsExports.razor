@@ -202,14 +202,18 @@
                 </div>
             }
 
-            @if (CountStatus(RuleImportStatus.New) > 0)
+            @if (CountStatus(RuleImportStatus.New) > 0 || CountStatus(RuleImportStatus.Changed) > 0)
             {
                 <div class="alert alert-info">
                     <div class="d-flex justify-content-between align-items-start gap-3">
                         <div>
-                            <strong>@CountStatus(RuleImportStatus.New) new reusable rule(s) detected.</strong>
+                            <strong>
+                                @CountStatus(RuleImportStatus.New) new and
+                                @CountStatus(RuleImportStatus.Changed) changed reusable rule(s) detected.
+                            </strong>
                             <div class="small mt-1">
-                                These rules are being added to the shared rule library. You can also add the selected new rules to an existing Rule Set.
+                                Changed means the rule name already exists in the library, but its conditions or settings differ.
+                                Selected New and Changed rules can also be added to an existing Rule Set.
                             </div>
                         </div>
                     </div>
@@ -220,7 +224,7 @@
                                @bind="addImportedRulesToRuleSet"
                                id="addNewRulesToRuleSet" />
                         <label class="form-check-label" for="addNewRulesToRuleSet">
-                            Add selected new rules to a Rule Set
+                            Add selected new or changed rules to a Rule Set
                         </label>
                     </div>
 
@@ -248,7 +252,7 @@
                         </div>
 
                         <div class="form-text mt-2">
-                            Only selected rules marked <strong>New</strong> will be added to this Rule Set.
+                            Only selected rules marked <strong>New</strong> or <strong>Changed</strong> will be added to this Rule Set.
                         </div>
                     }
                 </div>
@@ -295,7 +299,7 @@
                                     }
                                     else if (item.Status == RuleImportStatus.Changed)
                                     {
-                                        <span class="small text-muted">Existing rule with the same name will be updated.</span>
+                                        <span class="small text-muted">Same rule name exists, but the conditions or settings differ. Review this as a potentially different rule before importing.</span>
                                     }
                                     else if (item.Status == RuleImportStatus.Unchanged)
                                     {
@@ -608,7 +612,7 @@
                 await using var db = await DbFactory.CreateDbContextAsync();
 
                 var importedNames = previewItems
-                    .Where(x => x.Selected && x.Status == RuleImportStatus.New)
+                    .Where(x => x.Selected && x.Status is RuleImportStatus.New or RuleImportStatus.Changed)
                     .Select(x => x.Name)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
@@ -630,7 +634,7 @@
                 + (result.ClientSpecificAdded > 0 || result.ClientSpecificUpdated > 0
                     ? $" {result.ClientSpecificAdded} client-specific rule(s) added and {result.ClientSpecificUpdated} client-specific rule(s) updated."
                     : string.Empty)
-                + (addImportedRulesToRuleSet ? $" {groupedCount} new reusable rule(s) were added to the selected Rule Set." : string.Empty);
+                + (addImportedRulesToRuleSet ? $" {groupedCount} new/changed reusable rule(s) were added to the selected Rule Set." : string.Empty);
 
             showImportReview = false;
             showImport = false;
