@@ -13,7 +13,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <h1>Master Rules</h1>
-        <p class="text-muted mb-0">Maintain the firm's canonical rules once and assign them across clients.</p>
+        <p class="text-muted mb-0">Maintain reusable rules that can be added to Rule Sets or assigned directly to individual clients.</p>
     </div>
     <button class="btn btn-primary" @onclick="BeginAdd">New Master Rule</button>
 </div>
@@ -167,16 +167,16 @@
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <div>
-                    <h5 class="card-title mb-1">Assign "@batchRule.Name"</h5>
-                    <div class="text-muted">Existing assignments are skipped automatically.</div>
+                    <h5 class="card-title mb-1">Assign "@batchRule.Name" Directly</h5>
+                    <div class="text-muted">Use direct assignment for one-off client needs. Rule Set membership is managed separately.</div>
                 </div>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="CloseBatchAssign">Close</button>
             </div>
 
             <div class="d-flex gap-2 mb-3">
-                <button class="btn btn-primary" @onclick="AssignBatchToAllActiveAsync">Assign to All Active Clients</button>
+                <button class="btn btn-primary" @onclick="AssignBatchToAllActiveAsync">Assign Directly to All Active Clients</button>
                 <button class="btn btn-outline-primary" @onclick="AssignBatchToSelectedAsync" disabled="@(selectedClientIds.Count == 0)">
-                    Assign to Selected (@selectedClientIds.Count)
+                    Assign Directly to Selected (@selectedClientIds.Count)
                 </button>
             </div>
 
@@ -261,7 +261,7 @@
                                     </span>
                                 </td>
                                 <td class="text-end">
-                                    <button class="btn btn-sm btn-outline-success me-2" @onclick="() => OpenBatchAssignAsync(rule)">Assign</button>
+                                    <button class="btn btn-sm btn-outline-success me-2" @onclick="() => OpenBatchAssignAsync(rule)">Assign Directly</button>
                                     <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => BeginEdit(rule)">Edit</button>
                                     <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(rule)">
                                         @(rule.IsActive ? "Deactivate" : "Activate")
