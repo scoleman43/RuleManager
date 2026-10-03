@@ -1,4 +1,11 @@
 @page "/categories"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using RuleManager.Core.Domain
+@using RuleManager.Data
+@using RuleManager.Data.Services
+@inject IDbContextFactory<RuleManagerDbContext> DbFactory
+@inject WorkspaceService Workspace
 
 <PageTitle>Categories</PageTitle>
 
@@ -7,14 +14,197 @@
         <h1>Categories</h1>
         <p class="text-muted mb-0">Manage standard categories used by master and client rules.</p>
     </div>
-    <button class="btn btn-primary" disabled>Add Category</button>
+    <button class="btn btn-primary" @onclick="BeginAdd">Add Category</button>
 </div>
 
 <div class="alert alert-info">
-    Use a colon to separate a main category and subcategory. Example:
-    <strong>Auto:Insurance</strong> means <strong>Auto</strong> is the main category and <strong>Insurance</strong> is the subcategory.
+    Use a colon <strong>:</strong> to separate a main category and subcategory.
+    Example: <strong>Auto:Insurance</strong> means <strong>Auto</strong> is the main category and
+    <strong>Insurance</strong> is the subcategory.
 </div>
 
-<div class="card"><div class="card-body">
-    <p class="mb-0 text-muted">Category management will be database-backed in the next milestone.</p>
-</div></div>
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success")">@message</div>
+}
+
+@if (showEditor)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">@(editId.HasValue ? "Edit Category" : "Add Category")</h5>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-8">
+                    <label class="form-label">Category</label>
+                    <input class="form-control" @bind="categoryName" placeholder="Example: Auto:Insurance" />
+                    <div class="form-text">Main and subcategory names are separated by a colon (:).</div>
+                </div>
+                <div class="col-md-4 d-flex gap-2">
+                    <button class="btn btn-primary" @onclick="SaveAsync">Save</button>
+                    <button class="btn btn-outline-secondary" @onclick="CancelEdit">Cancel</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="card">
+    <div class="card-body p-0">
+        @if (categories.Count == 0)
+        {
+            <div class="p-4 text-muted">No categories have been added yet.</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Main Category</th>
+                            <th>Subcategory</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var category in categories)
+                        {
+                            <tr>
+                                <td><strong>@category.Name</strong></td>
+                                <td>@category.MainCategory</td>
+                                <td>@(category.SubCategory ?? "—")</td>
+                                <td>
+                                    <span class="badge @(category.IsActive ? "text-bg-success" : "text-bg-secondary")">
+                                        @(category.IsActive ? "Active" : "Inactive")
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => BeginEdit(category)">Edit</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(category)">
+                                        @(category.IsActive ? "Deactivate" : "Activate")
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly List<Category> categories = new();
+    private Guid organizationId;
+    private Guid? editId;
+    private string categoryName = string.Empty;
+    private bool showEditor;
+    private bool isError;
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        categories.Clear();
+        categories.AddRange(await db.Categories
+            .Where(x => x.OrganizationId == organizationId)
+            .OrderByDescending(x => x.IsActive)
+            .ThenBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+    }
+
+    private void BeginAdd()
+    {
+        editId = null;
+        categoryName = string.Empty;
+        showEditor = true;
+        message = null;
+        isError = false;
+    }
+
+    private void BeginEdit(Category category)
+    {
+        editId = category.Id;
+        categoryName = category.Name;
+        showEditor = true;
+        message = null;
+        isError = false;
+    }
+
+    private void CancelEdit()
+    {
+        showEditor = false;
+        editId = null;
+        categoryName = string.Empty;
+    }
+
+    private async Task SaveAsync()
+    {
+        string normalized;
+        try
+        {
+            normalized = CategoryName.Normalize(categoryName);
+        }
+        catch (ArgumentException ex)
+        {
+            isError = true;
+            message = ex.Message;
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var duplicateExists = await db.Categories.AnyAsync(x =>
+            x.OrganizationId == organizationId &&
+            x.Name.ToLower() == normalized.ToLower() &&
+            (!editId.HasValue || x.Id != editId.Value));
+
+        if (duplicateExists)
+        {
+            isError = true;
+            message = $"Category '{normalized}' already exists.";
+            return;
+        }
+
+        if (editId.HasValue)
+        {
+            var category = await db.Categories.SingleAsync(x => x.Id == editId.Value);
+            category.Name = normalized;
+            category.ModifiedUtc = DateTime.UtcNow;
+        }
+        else
+        {
+            db.Categories.Add(new Category
+            {
+                OrganizationId = organizationId,
+                Name = normalized
+            });
+        }
+
+        await db.SaveChangesAsync();
+        showEditor = false;
+        editId = null;
+        categoryName = string.Empty;
+        isError = false;
+        message = "Category saved.";
+        await LoadAsync();
+    }
+
+    private async Task ToggleActiveAsync(Category category)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Categories.SingleAsync(x => x.Id == category.Id);
+        entity.IsActive = !entity.IsActive;
+        entity.ModifiedUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+}
