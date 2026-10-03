@@ -166,7 +166,7 @@
                             <th>Transaction Type</th>
                             <th>Category</th>
                             <th>Status</th>
-                            <th class="text-end">Actions</th>
+                            <th class="text-end" style="min-width: 300px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -193,11 +193,13 @@
                                     </span>
                                 </td>
                                 <td class="text-end">
-                                    <button class="btn btn-sm btn-outline-success me-2" @onclick="() => OpenBatchAssignAsync(rule)">Assign Directly</button>
-                                    <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => EditRule(rule.Id)">Edit</button>
-                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(rule)">
-                                        @(rule.IsActive ? "Deactivate" : "Activate")
-                                    </button>
+                                    <div class="d-inline-flex align-items-center justify-content-end gap-2 flex-nowrap rule-actions">
+                                        <button class="btn btn-sm btn-outline-success" @onclick="() => OpenBatchAssignAsync(rule)">Assign Directly</button>
+                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => EditRule(rule.Id)">Edit</button>
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(rule)">
+                                            @(rule.IsActive ? "Deactivate" : "Activate")
+                                        </button>
+                                    </div>
                                 </td>
                             </tr>
                         }
