@@ -1,0 +1,109 @@
+@page "/consistency"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using RuleManager.Core.Domain
+@using RuleManager.Core.Rules
+@using RuleManager.Data
+@using RuleManager.Data.Services
+@inject IDbContextFactory<RuleManagerDbContext> DbFactory
+@inject WorkspaceService Workspace
+@inject NavigationManager Navigation
+
+<PageTitle>Consistency</PageTitle>
+
+<h1>Consistency</h1>
+<p class="text-muted">See which clients are aligned with the active master rule library.</p>
+
+<div class="card">
+    <div class="card-body p-0">
+        @if (rows.Count == 0)
+        {
+            <div class="p-4 text-muted">No active clients have been added yet.</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Client</th>
+                            <th>Inherited</th>
+                            <th>Overridden</th>
+                            <th>Missing</th>
+                            <th>Conflict</th>
+                            <th>Overall</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var row in rows)
+                        {
+                            <tr>
+                                <td><strong>@row.ClientName</strong></td>
+                                <td>@row.Summary.Inherited</td>
+                                <td>@row.Summary.Overridden</td>
+                                <td>@row.Summary.Missing</td>
+                                <td>@row.Summary.Conflict</td>
+                                <td>
+                                    @if (row.Summary.Issues == 0)
+                                    {
+                                        <span class="badge text-bg-success">Aligned</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge text-bg-warning">@row.Summary.Issues issue(s)</span>
+                                    }
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary"
+                                            @onclick="() => Navigation.NavigateTo($"/clients/{row.ClientId}/rules")">
+                                        Review
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly List<ConsistencyRow> rows = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var masterIds = await db.MasterRules
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .Select(x => x.Id)
+            .ToListAsync();
+
+        var clients = await db.Clients
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync();
+
+        var clientIds = clients.Select(x => x.Id).ToArray();
+        var assignments = await db.ClientRuleAssignments
+            .Where(x => clientIds.Contains(x.ClientId))
+            .AsNoTracking()
+            .ToListAsync();
+
+        rows.Clear();
+        foreach (var client in clients)
+        {
+            var clientAssignments = assignments.Where(x => x.ClientId == client.Id);
+            rows.Add(new ConsistencyRow(
+                client.Id,
+                client.Name,
+                ConsistencyCalculator.Calculate(masterIds, clientAssignments)));
+        }
+    }
+
+    private sealed record ConsistencyRow(Guid ClientId, string ClientName, ConsistencySummary Summary);
+}
