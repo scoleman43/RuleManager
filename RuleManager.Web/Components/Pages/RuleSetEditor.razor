@@ -1,0 +1,387 @@
+@page "/rule-sets/new"
+@page "/rule-sets/{RuleSetId:guid}/edit"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using RuleManager.Core.Domain
+@using RuleManager.Data
+@using RuleManager.Data.Services
+@inject IDbContextFactory<RuleManagerDbContext> DbFactory
+@inject WorkspaceService Workspace
+@inject RuleSetAssignmentService RuleSetAssignments
+@inject NavigationManager Navigation
+
+<PageTitle>@(RuleSetId.HasValue ? "Edit Rule Set" : "New Rule Set")</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <button class="btn btn-link p-0 mb-2" @onclick="BackToRuleSets">← Back to Rule Sets</button>
+        <h1>@(RuleSetId.HasValue ? "Edit Rule Set" : "New Rule Set")</h1>
+        <p class="text-muted mb-0">Define the Rule Set, then choose which rules belong to it.</p>
+    </div>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success")">@message</div>
+}
+
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label">Name</label>
+                <input class="form-control" @bind="setName" placeholder="Example: Base Business Rules" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">Description</label>
+                <input class="form-control" @bind="setDescription" />
+            </div>
+        </div>
+
+        <div class="mt-3 d-flex gap-2">
+            <button class="btn btn-primary" @onclick="SaveSetAsync">Save Rule Set</button>
+            <button class="btn btn-outline-secondary" @onclick="BackToRuleSets">Cancel</button>
+        </div>
+    </div>
+</div>
+
+@if (RuleSetId.HasValue)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-lg-5">
+                    <label class="form-label">Search Rules</label>
+                    <input class="form-control"
+                           @bind="ruleSearchText"
+                           @bind:event="oninput"
+                           placeholder="Rule name, category, payee, or condition..." />
+                </div>
+
+                <div class="col-md-4 col-lg-3">
+                    <label class="form-label">Selection</label>
+                    <select class="form-select" @bind="selectionFilter">
+                        <option value="all">All Rules</option>
+                        <option value="selected">Selected</option>
+                        <option value="not-selected">Not Selected</option>
+                    </select>
+                </div>
+
+                <div class="col-md-4 col-lg-2">
+                    <label class="form-label">Direction</label>
+                    <select class="form-select" @bind="directionFilter">
+                        <option value="all">All</option>
+                        <option value="out">Money out</option>
+                        <option value="in">Money in</option>
+                    </select>
+                </div>
+
+                <div class="col-md-4 col-lg-2">
+                    <label class="form-label">Category</label>
+                    <select class="form-select" @bind="categoryFilter">
+                        <option value="all">All</option>
+                        <option value="none">No category</option>
+                        @foreach (var category in categoryNames)
+                        {
+                            <option value="@category">@category</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="d-flex justify-content-between align-items-center mt-3">
+                <div class="text-muted small">
+                    Showing @FilteredRules.Count() of @masterRules.Count rule(s) · @selectedRuleIds.Count selected
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ClearRuleFilters">Clear Filters</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-body p-0">
+            @if (!FilteredRules.Any())
+            {
+                <div class="p-4 text-muted">No rules match the current search and filters.</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th style="width: 70px;">Selected</th>
+                                <th>Rule</th>
+                                <th>Direction</th>
+                                <th>Transaction</th>
+                                <th>Category</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var rule in FilteredRules)
+                            {
+                                var selected = selectedRuleIds.Contains(rule.Id);
+
+                                <tr>
+                                    <td>
+                                        <input class="form-check-input"
+                                               type="checkbox"
+                                               checked="@selected"
+                                               @onchange="e => ToggleRuleAsync(rule.Id, e)" />
+                                    </td>
+                                    <td>
+                                        <strong>@rule.Name</strong>
+                                        @if (!string.IsNullOrWhiteSpace(rule.Payee))
+                                        {
+                                            <div class="small text-muted">Payee: @rule.Payee</div>
+                                        }
+                                    </td>
+                                    <td>@(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")</td>
+                                    <td>@FormatTransactionType(rule.TransactionType)</td>
+                                    <td>@(rule.CategoryName ?? "—")</td>
+                                    <td>
+                                        @if (selected)
+                                        {
+                                            <span class="badge text-bg-success">Selected</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge text-bg-secondary">Not selected</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="alert alert-secondary mt-3">
+        Clients assigned to this Rule Set automatically inherit rules added here.
+    </div>
+}
+else
+{
+    <div class="alert alert-info">
+        Save the Rule Set first. After it is created, you can search and select rules to add to it.
+    </div>
+}
+
+@code {
+    [Parameter] public Guid? RuleSetId { get; set; }
+
+    private Guid organizationId;
+    private string setName = string.Empty;
+    private string setDescription = string.Empty;
+    private string? message;
+    private bool isError;
+
+    private readonly List<MasterRule> masterRules = new();
+    private readonly HashSet<Guid> selectedRuleIds = new();
+    private readonly List<string> categoryNames = new();
+
+    private string ruleSearchText = string.Empty;
+    private string selectionFilter = "all";
+    private string directionFilter = "all";
+    private string categoryFilter = "all";
+
+    private IEnumerable<MasterRule> FilteredRules => masterRules.Where(rule =>
+        MatchesRuleSearch(rule)
+        && MatchesSelection(rule)
+        && MatchesDirection(rule)
+        && MatchesCategory(rule));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
+
+        if (RuleSetId.HasValue)
+            await LoadRuleSetAsync(RuleSetId.Value);
+        else
+            ResetNewSet();
+
+        await LoadRulesAsync();
+    }
+
+    private async Task LoadRuleSetAsync(Guid id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var set = await db.RuleSets
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == id && x.OrganizationId == organizationId);
+
+        if (set is null)
+        {
+            Navigation.NavigateTo("/rule-sets");
+            return;
+        }
+
+        setName = set.Name;
+        setDescription = set.Description ?? string.Empty;
+
+        selectedRuleIds.Clear();
+        foreach (var ruleId in await db.RuleSetRules
+            .Where(x => x.RuleSetId == id)
+            .Select(x => x.MasterRuleId)
+            .ToListAsync())
+        {
+            selectedRuleIds.Add(ruleId);
+        }
+
+        message = null;
+        isError = false;
+    }
+
+    private async Task LoadRulesAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        masterRules.Clear();
+        masterRules.AddRange(await db.MasterRules
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+
+        categoryNames.Clear();
+        categoryNames.AddRange(masterRules
+            .Select(x => x.CategoryName)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x));
+    }
+
+    private void ResetNewSet()
+    {
+        setName = string.Empty;
+        setDescription = string.Empty;
+        selectedRuleIds.Clear();
+        message = null;
+        isError = false;
+    }
+
+    private async Task SaveSetAsync()
+    {
+        var name = setName.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            SetError("Rule Set name is required.");
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        if (RuleSetId.HasValue)
+        {
+            var set = await db.RuleSets.SingleAsync(x => x.Id == RuleSetId.Value);
+            set.Name = name;
+            set.Description = NullIfWhiteSpace(setDescription);
+            set.ModifiedUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+
+            message = "Rule Set saved.";
+            isError = false;
+        }
+        else
+        {
+            var set = new RuleSet
+            {
+                OrganizationId = organizationId,
+                Name = name,
+                Description = NullIfWhiteSpace(setDescription)
+            };
+
+            db.RuleSets.Add(set);
+            await db.SaveChangesAsync();
+
+            Navigation.NavigateTo($"/rule-sets/{set.Id}/edit");
+        }
+    }
+
+    private async Task ToggleRuleAsync(Guid masterRuleId, ChangeEventArgs e)
+    {
+        if (!RuleSetId.HasValue)
+            return;
+
+        var selected = e.Value is bool value && value;
+
+        if (selected)
+        {
+            await RuleSetAssignments.AddRuleToSetAsync(RuleSetId.Value, masterRuleId);
+            selectedRuleIds.Add(masterRuleId);
+            message = "Rule added to the Rule Set and inherited by clients already using it.";
+        }
+        else
+        {
+            await RuleSetAssignments.RemoveRuleFromSetAsync(RuleSetId.Value, masterRuleId);
+            selectedRuleIds.Remove(masterRuleId);
+            message = "Rule removed from the Rule Set.";
+        }
+
+        isError = false;
+    }
+
+    private bool MatchesRuleSearch(MasterRule rule)
+    {
+        if (string.IsNullOrWhiteSpace(ruleSearchText))
+            return true;
+
+        var term = ruleSearchText.Trim();
+
+        return rule.Name.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || (rule.CategoryName?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || (rule.Payee?.Contains(term, StringComparison.OrdinalIgnoreCase) ?? false)
+            || rule.Conditions.Any(x => x.Value.Contains(term, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private bool MatchesSelection(MasterRule rule) => selectionFilter switch
+    {
+        "selected" => selectedRuleIds.Contains(rule.Id),
+        "not-selected" => !selectedRuleIds.Contains(rule.Id),
+        _ => true
+    };
+
+    private bool MatchesDirection(MasterRule rule) => directionFilter switch
+    {
+        "out" => rule.Direction == RuleDirection.MoneyOut,
+        "in" => rule.Direction == RuleDirection.MoneyIn,
+        _ => true
+    };
+
+    private bool MatchesCategory(MasterRule rule) => categoryFilter switch
+    {
+        "all" => true,
+        "none" => string.IsNullOrWhiteSpace(rule.CategoryName),
+        _ => string.Equals(rule.CategoryName, categoryFilter, StringComparison.OrdinalIgnoreCase)
+    };
+
+    private void ClearRuleFilters()
+    {
+        ruleSearchText = string.Empty;
+        selectionFilter = "all";
+        directionFilter = "all";
+        categoryFilter = "all";
+    }
+
+    private void BackToRuleSets() => Navigation.NavigateTo("/rule-sets");
+
+    private void SetError(string text)
+    {
+        isError = true;
+        message = text;
+    }
+
+    private static string? NullIfWhiteSpace(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string FormatTransactionType(RuleTransactionType type) => type switch
+    {
+        RuleTransactionType.CreditCardPayment => "Credit card payment",
+        _ => string.Concat(type.ToString().Select((c, i) => i > 0 && char.IsUpper(c) ? " " + c : c.ToString()))
+    };
+}
