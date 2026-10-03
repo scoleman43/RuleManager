@@ -83,7 +83,7 @@
                                 </td>
                                 <td>@(client.QuickBooksCompanyName ?? "—")</td>
                                 <td>
-                                    <span class="badge @(client.IsActive ? "text-bg-success" : "text-bg-secondary")">
+                                    <span class="badge @(client.IsActive ? "status-badge-active" : "status-badge-inactive")">
                                         @(client.IsActive ? "Active" : "Inactive")
                                     </span>
                                 </td>
