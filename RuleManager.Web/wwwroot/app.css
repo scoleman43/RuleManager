@@ -121,3 +121,10 @@ h1:focus {
     color: #842029;
     border: 1px solid #f1aeb5;
 }
+
+
+.status-badge-client-specific {
+    background-color: #e2d9f3;
+    color: #432874;
+    border: 1px solid #c5b3e6;
+}
