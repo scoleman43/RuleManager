@@ -188,7 +188,7 @@
                                 <td>@FormatTransactionType(rule.TransactionType)</td>
                                 <td>@(rule.CategoryName ?? "—")</td>
                                 <td>
-                                    <span class="badge @(rule.IsActive ? "text-bg-success" : "text-bg-secondary")">
+                                    <span class="badge @(rule.IsActive ? "status-badge-active" : "status-badge-inactive")">
                                         @(rule.IsActive ? "Active" : "Inactive")
                                     </span>
                                 </td>
