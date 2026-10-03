@@ -439,3 +439,70 @@ a:hover, .btn-link:hover {
         padding: 0.9rem 1rem 1rem;
     }
 }
+
+
+.rule-action-menu {
+    position: relative;
+}
+
+.rule-action-menu > summary {
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
+}
+
+.rule-action-menu > summary::-webkit-details-marker {
+    display: none;
+}
+
+.rule-action-menu[open] > summary {
+    background: #f2f4f2;
+    border-color: #aeb6b0;
+}
+
+.rule-action-menu-panel {
+    position: absolute;
+    right: 0;
+    top: calc(100% + 0.35rem);
+    z-index: 30;
+    min-width: 180px;
+    padding: 0.35rem;
+    background: #fff;
+    border: 1px solid var(--rm-border);
+    border-radius: 0.65rem;
+    box-shadow: 0 12px 30px rgba(16, 43, 23, 0.16);
+    text-align: left;
+}
+
+.rule-action-menu-item {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: var(--rm-text);
+    text-align: left;
+    padding: 0.55rem 0.7rem;
+    border-radius: 0.45rem;
+    font-weight: 600;
+    font-size: 0.88rem;
+}
+
+.rule-action-menu-item:hover {
+    background: #f3f8f2;
+    color: var(--rm-green-dark);
+}
+
+.rule-action-menu-divider {
+    height: 1px;
+    background: var(--rm-border);
+    margin: 0.3rem 0;
+}
+
+.rule-action-menu-danger {
+    color: var(--rm-danger);
+}
+
+.rule-action-menu-danger:hover {
+    background: #fff1f0;
+    color: #8f1b12;
+}
