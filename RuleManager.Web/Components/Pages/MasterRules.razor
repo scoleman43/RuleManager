@@ -93,16 +93,9 @@
             <div class="d-flex justify-content-between align-items-start mb-3">
                 <div>
                     <h5 class="card-title mb-1">Assign "@batchRule.Name" Directly</h5>
-                    <div class="text-muted">Use direct assignment for one-off client needs. Rule Set membership is managed separately.</div>
+                    <div class="text-muted">Find a client by name or choose one from the dropdown.</div>
                 </div>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="CloseBatchAssign">Close</button>
-            </div>
-
-            <div class="d-flex gap-2 mb-3">
-                <button class="btn btn-primary" @onclick="AssignBatchToAllActiveAsync">Assign Directly to All Active Clients</button>
-                <button class="btn btn-outline-primary" @onclick="AssignBatchToSelectedAsync" disabled="@(selectedClientIds.Count == 0)">
-                    Assign Directly to Selected (@selectedClientIds.Count)
-                </button>
             </div>
 
             @if (activeClients.Count == 0)
@@ -111,31 +104,42 @@
             }
             else
             {
-                <div class="row g-2">
-                    @foreach (var client in activeClients)
-                    {
-                        var clientId = client.Id;
-                        var alreadyAssigned = batchAssignedClientIds.Contains(clientId);
+                <div class="row g-3 align-items-end">
+                    <div class="col-lg-5">
+                        <label class="form-label">Find client</label>
+                        <input class="form-control"
+                               @bind="clientSearchText"
+                               @bind:event="oninput"
+                               placeholder="Start typing a client name..." />
+                    </div>
 
-                        <div class="col-md-6 col-lg-4">
-                            <div class="border rounded p-2">
-                                <div class="form-check">
-                                    <input class="form-check-input"
-                                           type="checkbox"
-                                           checked="@selectedClientIds.Contains(clientId)"
-                                           disabled="@alreadyAssigned"
-                                           @onchange="e => ToggleSelectedClient(clientId, e)" />
-                                    <label class="form-check-label">
-                                        @client.Name
-                                        @if (alreadyAssigned)
-                                        {
-                                            <span class="badge text-bg-success ms-1">Assigned</span>
-                                        }
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-                    }
+                    <div class="col-lg-5">
+                        <label class="form-label">Client</label>
+                        <select class="form-select" @bind="selectedDirectClientId">
+                            <option value="">-- Select client --</option>
+                            @foreach (var client in DirectClientOptions)
+                            {
+                                <option value="@client.Id">
+                                    @client.Name@(directAssignedClientIds.Contains(client.Id) ? " — already assigned directly" : "")
+                                </option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="col-lg-2">
+                        <button class="btn btn-primary w-100" @onclick="AssignDirectToClientAsync">
+                            Assign
+                        </button>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(clientSearchText) && !DirectClientOptions.Any())
+                {
+                    <div class="text-muted small mt-2">No active clients match that name.</div>
+                }
+
+                <div class="form-text mt-2">
+                    Direct assignment is intended for one-off client needs. Rules used broadly should be added to a Rule Set.
                 </div>
             }
         </div>
@@ -218,8 +222,9 @@
 
     private MasterRule? batchRule;
     private readonly List<Client> activeClients = new();
-    private readonly HashSet<Guid> selectedClientIds = new();
-    private readonly HashSet<Guid> batchAssignedClientIds = new();
+    private readonly HashSet<Guid> directAssignedClientIds = new();
+    private string clientSearchText = string.Empty;
+    private string selectedDirectClientId = string.Empty;
 
     private IEnumerable<MasterRule> FilteredRules => rules.Where(rule =>
         MatchesSearch(rule) &&
@@ -227,6 +232,11 @@
         MatchesDirection(rule) &&
         MatchesTransaction(rule) &&
         MatchesCategory(rule));
+
+    private IEnumerable<Client> DirectClientOptions =>
+        activeClients.Where(client =>
+            string.IsNullOrWhiteSpace(clientSearchText)
+            || client.Name.Contains(clientSearchText.Trim(), StringComparison.OrdinalIgnoreCase));
 
     protected override async Task OnInitializedAsync()
     {
@@ -309,8 +319,9 @@
     private async Task OpenBatchAssignAsync(MasterRule rule)
     {
         batchRule = rule;
-        selectedClientIds.Clear();
-        batchAssignedClientIds.Clear();
+        clientSearchText = string.Empty;
+        selectedDirectClientId = string.Empty;
+        directAssignedClientIds.Clear();
 
         await using var db = await DbFactory.CreateDbContextAsync();
 
@@ -321,108 +332,82 @@
             .AsNoTracking()
             .ToListAsync());
 
-        var assignedIds = await db.ClientRuleAssignments
-            .Where(x => x.MasterRuleId == rule.Id)
+        var directlyAssignedIds = await db.ClientRuleAssignments
+            .Where(x => x.MasterRuleId == rule.Id && x.IsExplicit)
             .Select(x => x.ClientId)
             .ToListAsync();
 
-        foreach (var id in assignedIds)
-            batchAssignedClientIds.Add(id);
+        foreach (var id in directlyAssignedIds)
+            directAssignedClientIds.Add(id);
     }
 
     private void CloseBatchAssign()
     {
         batchRule = null;
         activeClients.Clear();
-        selectedClientIds.Clear();
-        batchAssignedClientIds.Clear();
+        directAssignedClientIds.Clear();
+        clientSearchText = string.Empty;
+        selectedDirectClientId = string.Empty;
     }
 
-    private void ToggleSelectedClient(Guid clientId, ChangeEventArgs e)
-    {
-        if (e.Value is bool isChecked && isChecked)
-            selectedClientIds.Add(clientId);
-        else
-            selectedClientIds.Remove(clientId);
-    }
-
-    private async Task AssignBatchToAllActiveAsync()
+    private async Task AssignDirectToClientAsync()
     {
         if (batchRule is null)
             return;
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var assigned = await AssignRuleToClientsAsync(db, batchRule.Id, null);
+        Guid clientId;
 
-        message = assigned == 0
-            ? "All active clients already have this rule assigned."
-            : $"Rule assigned directly to {assigned} additional active client(s).";
-
-        await OpenBatchAssignAsync(batchRule);
-    }
-
-    private async Task AssignBatchToSelectedAsync()
-    {
-        if (batchRule is null || selectedClientIds.Count == 0)
-            return;
-
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var assigned = await AssignRuleToClientsAsync(db, batchRule.Id, selectedClientIds);
-
-        message = assigned == 0
-            ? "The selected clients already have this rule assigned."
-            : $"Rule assigned directly to {assigned} selected client(s).";
-
-        await OpenBatchAssignAsync(batchRule);
-    }
-
-    private async Task<int> AssignRuleToClientsAsync(
-        RuleManagerDbContext db,
-        Guid masterRuleId,
-        IReadOnlyCollection<Guid>? selectedIds)
-    {
-        var clientQuery = db.Clients
-            .Where(x => x.OrganizationId == organizationId && x.IsActive);
-
-        if (selectedIds is not null)
-            clientQuery = clientQuery.Where(x => selectedIds.Contains(x.Id));
-
-        var clientIds = await clientQuery.Select(x => x.Id).ToListAsync();
-
-        var existingAssignments = await db.ClientRuleAssignments
-            .Where(x => x.MasterRuleId == masterRuleId && clientIds.Contains(x.ClientId))
-            .ToListAsync();
-
-        var existingByClient = existingAssignments.ToDictionary(x => x.ClientId);
-        var changed = 0;
-
-        foreach (var clientId in clientIds)
+        if (Guid.TryParse(selectedDirectClientId, out var selectedId))
         {
-            if (existingByClient.TryGetValue(clientId, out var existing))
+            clientId = selectedId;
+        }
+        else
+        {
+            var matches = DirectClientOptions.ToList();
+
+            if (matches.Count != 1)
             {
-                if (!existing.IsExplicit)
-                {
-                    existing.IsExplicit = true;
-                    existing.ModifiedUtc = DateTime.UtcNow;
-                    changed++;
-                }
-                continue;
+                message = matches.Count == 0
+                    ? "Enter a client name or select a client from the dropdown."
+                    : "More than one client matches. Select the client you want from the dropdown.";
+                return;
             }
 
+            clientId = matches[0].Id;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var assignment = await db.ClientRuleAssignments
+            .SingleOrDefaultAsync(x => x.ClientId == clientId && x.MasterRuleId == batchRule.Id);
+
+        if (assignment is null)
+        {
             db.ClientRuleAssignments.Add(new ClientRuleAssignment
             {
                 ClientId = clientId,
-                MasterRuleId = masterRuleId,
+                MasterRuleId = batchRule.Id,
                 Status = RuleAssignmentStatus.Inherited,
                 IsExplicit = true
             });
-            changed++;
+
+            await db.SaveChangesAsync();
+        }
+        else if (!assignment.IsExplicit)
+        {
+            assignment.IsExplicit = true;
+            assignment.ModifiedUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+        else
+        {
+            message = "That rule is already assigned directly to this client.";
+            return;
         }
 
-        if (changed > 0)
-            await db.SaveChangesAsync();
-
-        return changed;
+        var clientName = activeClients.First(x => x.Id == clientId).Name;
+        message = $"Rule assigned directly to {clientName}.";
+        await OpenBatchAssignAsync(batchRule);
     }
 
     private async Task ToggleActiveAsync(MasterRule rule)
