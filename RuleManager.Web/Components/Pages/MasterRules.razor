@@ -99,13 +99,6 @@
                             <input class="form-check-input" type="checkbox" @bind="autoAdd" id="autoAddRule" />
                             <label class="form-check-label" for="autoAddRule">Auto-add matching transactions</label>
                         </div>
-                        @if (!editId.HasValue)
-                        {
-                            <div class="form-check">
-                                <input class="form-check-input" type="checkbox" @bind="assignToAllActiveClients" id="assignAllClients" />
-                                <label class="form-check-label" for="assignAllClients">Assign this rule to all active clients</label>
-                            </div>
-                        }
                     </div>
                 </div>
             </div>
@@ -297,7 +290,6 @@
     private string payee = string.Empty;
     private string conditionLogic = "all";
     private bool autoAdd;
-    private bool assignToAllActiveClients = true;
     private bool showEditor;
     private bool isError;
     private string? message;
@@ -348,7 +340,6 @@
         payee = string.Empty;
         conditionLogic = "all";
         autoAdd = false;
-        assignToAllActiveClients = true;
         showCategoryCreator = false;
         newCategoryName = string.Empty;
         conditions.Clear();
@@ -368,7 +359,6 @@
         payee = rule.Payee ?? string.Empty;
         conditionLogic = rule.MatchAllConditions ? "all" : "any";
         autoAdd = rule.AutoAdd;
-        assignToAllActiveClients = false;
         showCategoryCreator = false;
         newCategoryName = string.Empty;
         conditions.Clear();
@@ -533,8 +523,6 @@
 
         await using var db = await DbFactory.CreateDbContextAsync();
 
-        var isNewRule = !editId.HasValue;
-
         MasterRule entity;
         if (editId.HasValue)
         {
@@ -569,19 +557,11 @@
 
         await db.SaveChangesAsync();
 
-        var assignedCount = 0;
-        if (isNewRule && assignToAllActiveClients)
-        {
-            assignedCount = await AssignRuleToClientsAsync(db, entity.Id, null);
-        }
-
         showEditor = false;
         editId = null;
         conditions.Clear();
         isError = false;
-        message = assignedCount > 0
-            ? $"Master rule saved and assigned to {assignedCount} active client(s)."
-            : "Master rule saved.";
+        message = "Master rule saved. Add it to a Rule Set to make it part of a reusable client template.";
         await LoadAsync();
     }
 
