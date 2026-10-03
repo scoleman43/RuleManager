@@ -128,3 +128,235 @@ h1:focus {
     color: #432874;
     border: 1px solid #c5b3e6;
 }
+
+
+:root {
+    --rm-green: #2ca01c;
+    --rm-green-dark: #217a16;
+    --rm-green-deep: #17361d;
+    --rm-green-soft: #edf8eb;
+    --rm-bg: #f6f7f8;
+    --rm-surface: #ffffff;
+    --rm-border: #e3e6e4;
+    --rm-text: #243026;
+    --rm-muted: #6f786f;
+    --rm-danger: #b42318;
+    --rm-warning: #9a6700;
+}
+
+body {
+    background: var(--rm-bg);
+    color: var(--rm-text);
+}
+
+h1, h2, h3, h4, h5, h6 {
+    color: #1f2d22;
+    letter-spacing: -0.015em;
+}
+
+h1 {
+    font-weight: 750;
+    margin-bottom: 0.3rem;
+}
+
+.text-muted {
+    color: var(--rm-muted) !important;
+}
+
+a, .btn-link {
+    color: var(--rm-green-dark);
+}
+
+a:hover, .btn-link:hover {
+    color: #185c10;
+}
+
+.content {
+    padding-top: 1.6rem;
+    padding-bottom: 2.5rem;
+}
+
+.card {
+    border: 1px solid var(--rm-border);
+    border-radius: 0.9rem;
+    box-shadow: 0 2px 12px rgba(24, 49, 29, 0.045);
+    background: var(--rm-surface);
+}
+
+.card-header {
+    background: #fbfcfb;
+    border-bottom-color: var(--rm-border);
+}
+
+.btn {
+    border-radius: 0.55rem;
+    font-weight: 650;
+}
+
+.btn-primary {
+    color: #fff;
+    background-color: var(--rm-green);
+    border-color: var(--rm-green);
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+    color: #fff;
+    background-color: var(--rm-green-dark);
+    border-color: var(--rm-green-dark);
+}
+
+.btn-outline-primary {
+    color: var(--rm-green-dark);
+    border-color: #88c47e;
+}
+
+.btn-outline-primary:hover,
+.btn-outline-primary:focus {
+    color: #fff;
+    background-color: var(--rm-green);
+    border-color: var(--rm-green);
+}
+
+.btn-outline-success {
+    color: var(--rm-green-dark);
+    border-color: #88c47e;
+}
+
+.btn-outline-success:hover,
+.btn-outline-success:focus {
+    color: #fff;
+    background-color: var(--rm-green);
+    border-color: var(--rm-green);
+}
+
+.btn-outline-danger {
+    color: var(--rm-danger);
+    border-color: #e1a29c;
+}
+
+.btn-outline-danger:hover {
+    color: #fff;
+    background: var(--rm-danger);
+    border-color: var(--rm-danger);
+}
+
+.btn:focus,
+.btn:active:focus,
+.btn-link.nav-link:focus,
+.form-control:focus,
+.form-select:focus,
+.form-check-input:focus {
+    box-shadow: 0 0 0 0.18rem rgba(44, 160, 28, 0.18);
+    border-color: #74bd69;
+}
+
+.form-control,
+.form-select {
+    border-color: #d7dbd8;
+    border-radius: 0.55rem;
+    min-height: 2.55rem;
+}
+
+.form-label {
+    font-weight: 650;
+    color: #3b473d;
+    font-size: 0.88rem;
+}
+
+.form-check-input:checked {
+    background-color: var(--rm-green);
+    border-color: var(--rm-green);
+}
+
+.table {
+    --bs-table-bg: transparent;
+    --bs-table-hover-bg: #f6fbf5;
+}
+
+.table thead th {
+    background: #f7f9f7;
+    color: #556058;
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.045em;
+    font-weight: 750;
+    border-bottom: 1px solid var(--rm-border);
+    white-space: nowrap;
+}
+
+.table > :not(caption) > * > * {
+    padding-top: 0.82rem;
+    padding-bottom: 0.82rem;
+    border-bottom-color: #edf0ee;
+}
+
+.badge {
+    border-radius: 999px;
+    font-weight: 700;
+    padding: 0.38em 0.68em;
+}
+
+.alert {
+    border-radius: 0.72rem;
+}
+
+.alert-info {
+    background: #eef7ed;
+    border-color: #c8e5c3;
+    color: #245c1c;
+}
+
+.alert-secondary {
+    background: #f5f6f5;
+    border-color: #dfe3e0;
+    color: #4c564f;
+}
+
+.status-badge-active,
+.status-badge-selected,
+.consistency-aligned {
+    background-color: #e9f6e7;
+    color: #246b1a;
+    border-color: #add6a6;
+}
+
+.rule-source-set {
+    background-color: #edf8eb;
+    color: #246b1a;
+    border-color: #b8dcb2;
+}
+
+.status-badge-client-specific {
+    background-color: #f1ecf8;
+    color: #5d3f82;
+    border-color: #d5c6e7;
+}
+
+.dashboard-kpi {
+    position: relative;
+    overflow: hidden;
+}
+
+.dashboard-kpi::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+    background: var(--rm-green);
+}
+
+.dashboard-kpi .display-6 {
+    color: #1d4f18;
+    font-weight: 750;
+    letter-spacing: -0.04em;
+}
+
+.page-toolbar {
+    background: #fff;
+    border: 1px solid var(--rm-border);
+    border-radius: 0.85rem;
+    box-shadow: 0 2px 10px rgba(24, 49, 29, 0.04);
+}
