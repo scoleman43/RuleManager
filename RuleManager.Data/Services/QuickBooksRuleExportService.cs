@@ -29,21 +29,23 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
         if (client is null)
             return Failed("Client was not found.");
 
-        var assignedRuleIds = await db.ClientRuleAssignments
+        var assignments = await db.ClientRuleAssignments
             .Where(x => x.ClientId == clientId)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        var assignedRuleIds = assignments
             .Select(x => x.MasterRuleId)
             .Distinct()
-            .ToListAsync(cancellationToken);
+            .ToArray();
 
         var rules = await db.MasterRules
             .Where(x => assignedRuleIds.Contains(x.Id) && x.IsActive)
-            .OrderBy(x => x.Name)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
         var clientSpecificRules = await db.ClientRules
             .Where(x => x.ClientId == clientId)
-            .OrderBy(x => x.Name)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
@@ -57,26 +59,31 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             .Select(x => x.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var rule in clientSpecificRules)
+        var assignmentPriority = assignments
+            .ToDictionary(x => x.MasterRuleId, x => x.ExportPriority);
+
+        var orderedRules = new List<(RuleBase Rule, int Priority)>();
+
+        orderedRules.AddRange(clientSpecificRules.Select(rule =>
+            ((RuleBase)rule, rule.ExportPriority)));
+
+        orderedRules.AddRange(rules
+            .Where(rule => !clientSpecificNames.Contains(rule.Name))
+            .Select(rule =>
+                ((RuleBase)rule,
+                 assignmentPriority.TryGetValue(rule.Id, out var priority)
+                    ? priority
+                    : int.MaxValue)));
+
+        foreach (var item in orderedRules
+            .OrderBy(x => x.Priority)
+            .ThenBy(x => x.Rule.Name))
         {
-            var row = BuildRow(rule, out var error);
+            var row = BuildRow(item.Rule, out var error);
 
             if (row is null)
             {
-                errors.Add($"{rule.Name}: {error}");
-                continue;
-            }
-
-            exportRows.Add(row);
-        }
-
-        foreach (var rule in rules.Where(x => !clientSpecificNames.Contains(x.Name)))
-        {
-            var row = BuildRow(rule, out var error);
-
-            if (row is null)
-            {
-                errors.Add($"{rule.Name}: {error}");
+                errors.Add($"{item.Rule.Name}: {error}");
                 continue;
             }
 
