@@ -506,3 +506,10 @@ a:hover, .btn-link:hover {
     background: #fff1f0;
     color: #8f1b12;
 }
+
+
+.export-priority-input {
+    width: 78px;
+    text-align: center;
+    font-weight: 700;
+}
