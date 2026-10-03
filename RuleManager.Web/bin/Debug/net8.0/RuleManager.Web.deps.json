@@ -1,0 +1,56 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "RuleManager.Web/1.0.0": {
+        "dependencies": {
+          "RuleManager.Core": "1.0.0",
+          "RuleManager.Data": "1.0.0"
+        },
+        "runtime": {
+          "RuleManager.Web.dll": {}
+        }
+      },
+      "RuleManager.Core/1.0.0": {
+        "runtime": {
+          "RuleManager.Core.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      },
+      "RuleManager.Data/1.0.0": {
+        "dependencies": {
+          "RuleManager.Core": "1.0.0"
+        },
+        "runtime": {
+          "RuleManager.Data.dll": {
+            "assemblyVersion": "1.0.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "RuleManager.Web/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "RuleManager.Core/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "RuleManager.Data/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
