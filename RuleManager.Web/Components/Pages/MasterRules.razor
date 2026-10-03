@@ -168,6 +168,7 @@
                             <th>Conditions</th>
                             <th>Transaction Type</th>
                             <th>Category</th>
+                            <th>Auto Add</th>
                             <th>Status</th>
                             <th class="text-end" style="min-width: 190px;">Actions</th>
                         </tr>
@@ -190,6 +191,11 @@
                                 </td>
                                 <td>@FormatTransactionType(rule.TransactionType)</td>
                                 <td>@(rule.CategoryName ?? "—")</td>
+                                <td>
+                                    <span class="badge @(rule.AutoAdd ? "status-badge-active" : "status-badge-inactive")">
+                                        @(rule.AutoAdd ? "Yes" : "No")
+                                    </span>
+                                </td>
                                 <td>
                                     <span class="badge @(rule.IsActive ? "status-badge-active" : "status-badge-inactive")">
                                         @(rule.IsActive ? "Active" : "Inactive")
