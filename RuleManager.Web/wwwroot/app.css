@@ -102,3 +102,22 @@ h1:focus {
 .rule-actions .btn {
     white-space: nowrap;
 }
+
+
+.status-badge-selected {
+    background-color: #d1e7dd;
+    color: #0f5132;
+    border: 1px solid #75b798;
+}
+
+.status-badge-not-selected {
+    background-color: #e2e3e5;
+    color: #41464b;
+    border: 1px solid #adb5bd;
+}
+
+.status-badge-error {
+    background-color: #f8d7da;
+    color: #842029;
+    border: 1px solid #f1aeb5;
+}
