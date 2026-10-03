@@ -13,6 +13,7 @@ public sealed class RuleManagerDbContext(DbContextOptions<RuleManagerDbContext> 
     public DbSet<RuleSet> RuleSets => Set<RuleSet>();
     public DbSet<RuleSetRule> RuleSetRules => Set<RuleSetRule>();
     public DbSet<ClientRuleAssignment> ClientRuleAssignments => Set<ClientRuleAssignment>();
+    public DbSet<ClientRuleSetAssignment> ClientRuleSetAssignments => Set<ClientRuleSetAssignment>();
     public DbSet<RuleOverride> RuleOverrides => Set<RuleOverride>();
     public DbSet<ImportBatch> ImportBatches => Set<ImportBatch>();
     public DbSet<ExportBatch> ExportBatches => Set<ExportBatch>();
@@ -37,6 +38,10 @@ public sealed class RuleManagerDbContext(DbContextOptions<RuleManagerDbContext> 
 
         modelBuilder.Entity<ClientRuleAssignment>()
             .HasIndex(x => new { x.ClientId, x.MasterRuleId })
+            .IsUnique();
+
+        modelBuilder.Entity<ClientRuleSetAssignment>()
+            .HasIndex(x => new { x.ClientId, x.RuleSetId })
             .IsUnique();
 
         modelBuilder.Entity<MasterRule>().OwnsMany(x => x.Conditions, owned => owned.ToJson());
