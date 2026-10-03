@@ -178,6 +178,9 @@
                     <div class="border rounded p-2"><strong>@CountStatus(RuleImportStatus.Duplicate)</strong> Duplicate</div>
                 </div>
                 <div class="col-md">
+                    <div class="border rounded p-2"><strong>@CountStatus(RuleImportStatus.ClientSpecific)</strong> Client-specific</div>
+                </div>
+                <div class="col-md">
                     <div class="border rounded p-2"><strong>@CountStatus(RuleImportStatus.Unsupported)</strong> Unsupported</div>
                 </div>
             </div>
@@ -198,6 +201,7 @@
                         <option value="@RuleImportStatus.Changed">Changed</option>
                         <option value="@RuleImportStatus.Unchanged">Unchanged</option>
                         <option value="@RuleImportStatus.Duplicate">Duplicate</option>
+                        <option value="@RuleImportStatus.ClientSpecific">Client-specific</option>
                         <option value="@RuleImportStatus.Unsupported">Unsupported</option>
                     </select>
                 </div>
@@ -205,6 +209,31 @@
                     <button class="btn btn-outline-secondary w-100" @onclick="ClearPreviewFilters">Clear Filters</button>
                 </div>
             </div>
+
+            @if (CountStatus(RuleImportStatus.ClientSpecific) > 0)
+            {
+                <div class="alert alert-warning">
+                    <strong>Client-specific rules detected.</strong>
+                    These rules contain account-specific QuickBooks data and are kept only for one client.
+                    Their original QuickBooks JSON is preserved so it can be written back exactly during export.
+
+                    <div class="row g-3 align-items-end mt-1">
+                        <div class="col-lg-8">
+                            <label class="form-label">Client for account-specific rules</label>
+                            <select class="form-select" @bind="clientSpecificClientId">
+                                <option value="">-- Select client --</option>
+                                @foreach (var client in clients)
+                                {
+                                    <option value="@client.Id">@client.Name</option>
+                                }
+                            </select>
+                            <div class="form-text">
+                                This client selection applies only to client-specific imported rules. It does not assign the reusable imported rules to the client.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
 
             <div class="table-responsive">
                 <table class="table table-hover align-middle">
@@ -226,7 +255,8 @@
                     <tbody>
                         @foreach (var item in FilteredPreviewItems)
                         {
-                            var selectable = item.Status is RuleImportStatus.New or RuleImportStatus.Changed;
+                            var selectable = item.Status is RuleImportStatus.New or RuleImportStatus.Changed
+                                || (item.Status == RuleImportStatus.ClientSpecific && Guid.TryParse(clientSpecificClientId, out _));
                             <tr>
                                 <td>
                                     <input class="form-check-input"
@@ -263,6 +293,10 @@
                                     {
                                         <span class="small text-muted">The import file contains this rule name more than once.</span>
                                     }
+                                    else if (item.Status == RuleImportStatus.ClientSpecific)
+                                    {
+                                        <span class="small text-muted">Account-specific rule. It will be stored only for the selected client and exported using its preserved QuickBooks data.</span>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -276,7 +310,7 @@
                 </div>
                 <div class="d-flex gap-2">
                     <button class="btn btn-outline-secondary" @onclick="CancelImportReview">Back</button>
-                    <button class="btn btn-primary" @onclick="CommitImportAsync" disabled="@(isImportBusy || previewItems.Count(x => x.Selected) == 0)">
+                    <button class="btn btn-primary" @onclick="CommitImportAsync" disabled="@(isImportBusy || previewItems.Count(x => x.Selected) == 0 || HasSelectedClientSpecificWithoutClient)">
                         @(isImportBusy ? "Importing..." : "Import Selected Rules")
                     </button>
                 </div>
@@ -355,6 +389,7 @@
     private bool addImportedRulesToRuleSet;
     private string ruleSetSearchText = string.Empty;
     private string importRuleSetId = string.Empty;
+    private string clientSpecificClientId = string.Empty;
     private string previewSearchText = string.Empty;
     private string previewStatusFilter = "all";
     private string? message;
@@ -363,6 +398,10 @@
         ruleSets.Where(set =>
             string.IsNullOrWhiteSpace(ruleSetSearchText)
             || set.Name.Contains(ruleSetSearchText.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private bool HasSelectedClientSpecificWithoutClient =>
+        previewItems.Any(x => x.Selected && x.Status == RuleImportStatus.ClientSpecific)
+        && !Guid.TryParse(clientSpecificClientId, out _);
 
     private IEnumerable<RuleImportPreviewItem> FilteredPreviewItems =>
         previewItems.Where(item =>
@@ -484,7 +523,12 @@
             previewItems.AddRange(items);
 
             if (compareToClient && Guid.TryParse(importClientId, out var clientId))
+            {
                 await AddClientComparisonAsync(clientId);
+
+                if (previewItems.Any(x => x.Status == RuleImportStatus.ClientSpecific))
+                    clientSpecificClientId = importClientId;
+            }
 
             showImportReview = true;
             showImport = false;
@@ -528,8 +572,20 @@
     {
         if (previewItems.Count(x => x.Selected) == 0)
         {
-            message = "Select at least one New or Changed rule to import.";
+            message = "Select at least one rule to import.";
             return;
+        }
+
+        Guid? clientSpecificId = null;
+        if (previewItems.Any(x => x.Selected && x.Status == RuleImportStatus.ClientSpecific))
+        {
+            if (!Guid.TryParse(clientSpecificClientId, out var parsedClientSpecificId))
+            {
+                message = "Select the client that owns the account-specific imported rules.";
+                return;
+            }
+
+            clientSpecificId = parsedClientSpecificId;
         }
 
         isImportBusy = true;
@@ -537,7 +593,7 @@
 
         try
         {
-            var result = await ImportService.ApplyAsync(organizationId, previewItems);
+            var result = await ImportService.ApplyAsync(organizationId, previewItems, clientSpecificId);
             var groupedCount = 0;
 
             if (addImportedRulesToRuleSet
@@ -563,8 +619,11 @@
                 }
             }
 
-            message = $"Import complete: {result.Added} rule(s) added and {result.Updated} rule(s) updated."
-                + (addImportedRulesToRuleSet ? $" {groupedCount} supported imported rule(s) are associated with the selected Rule Set." : string.Empty);
+            message = $"Import complete: {result.Added} reusable rule(s) added and {result.Updated} reusable rule(s) updated."
+                + (result.ClientSpecificAdded > 0 || result.ClientSpecificUpdated > 0
+                    ? $" {result.ClientSpecificAdded} client-specific rule(s) added and {result.ClientSpecificUpdated} client-specific rule(s) updated."
+                    : string.Empty)
+                + (addImportedRulesToRuleSet ? $" {groupedCount} reusable imported rule(s) are associated with the selected Rule Set." : string.Empty);
 
             showImportReview = false;
             showImport = false;
@@ -627,6 +686,7 @@
         addImportedRulesToRuleSet = false;
         ruleSetSearchText = string.Empty;
         importRuleSetId = string.Empty;
+        clientSpecificClientId = string.Empty;
         previewSearchText = string.Empty;
         previewStatusFilter = "all";
         previewItems.Clear();
@@ -685,6 +745,7 @@
         RuleImportStatus.Changed => "badge consistency-issues",
         RuleImportStatus.Unchanged => "badge consistency-none",
         RuleImportStatus.Duplicate => "badge consistency-issues",
+        RuleImportStatus.ClientSpecific => "badge status-badge-client-specific",
         RuleImportStatus.Unsupported => "badge status-badge-error",
         _ => "badge consistency-none"
     };
