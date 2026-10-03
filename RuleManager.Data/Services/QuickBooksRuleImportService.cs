@@ -24,6 +24,7 @@ public sealed class RuleImportPreviewItem
     public List<RuleCondition> Conditions { get; init; } = new();
     public string? CategoryName { get; init; }
     public bool AutoAdd { get; init; }
+    public bool MatchAllConditions { get; init; } = true;
     public string? OriginalConditionsJson { get; init; }
     public string? OriginalOutputsJson { get; init; }
     public bool IsReadOnlyImport { get; init; }
@@ -117,6 +118,31 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
         var added = 0;
         var updated = 0;
 
+        var importedCategoryNames = selected
+            .Select(x => x.CategoryName)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var categories = await db.Categories
+            .Where(x => x.OrganizationId == organizationId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var categoryName in importedCategoryNames)
+        {
+            if (categories.Any(x => string.Equals(x.Name, categoryName, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            var category = new Category
+            {
+                OrganizationId = organizationId,
+                Name = categoryName
+            };
+            db.Categories.Add(category);
+            categories.Add(category);
+        }
+
         foreach (var item in selected)
         {
             MasterRule entity;
@@ -142,9 +168,11 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             entity.Direction = item.Direction;
             entity.TransactionType = item.TransactionType;
             entity.CategoryName = item.CategoryName;
-            entity.CategoryId = null;
+            entity.CategoryId = categories
+                .FirstOrDefault(x => string.Equals(x.Name, item.CategoryName, StringComparison.OrdinalIgnoreCase))
+                ?.Id;
             entity.Payee = null;
-            entity.MatchAllConditions = true;
+            entity.MatchAllConditions = item.MatchAllConditions;
             entity.AutoAdd = item.AutoAdd;
             entity.Conditions = item.Conditions.Select(x => new RuleCondition
             {
@@ -222,6 +250,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
         var reasons = new List<string>();
         var direction = RuleDirection.MoneyOut;
         var hasDirection = false;
+        var matchAllConditions = true;
         var conditions = new List<RuleCondition>();
 
         if (string.IsNullOrWhiteSpace(name))
@@ -237,6 +266,11 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             {
                 foreach (var obj in EnumerateObjects(conditionsDoc!.RootElement))
                 {
+                    if (TryGetProperty(obj, "isAndRule", out var isAndRuleElement)
+                        && isAndRuleElement.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    {
+                        matchAllConditions = isAndRuleElement.GetBoolean();
+                    }
                     if (!TryGetInt(obj, "ruleType", out var ruleType))
                         continue;
 
@@ -353,6 +387,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             Conditions = conditions,
             CategoryName = NullIfWhiteSpace(categoryName),
             AutoAdd = autoAdd,
+            MatchAllConditions = matchAllConditions,
             OriginalConditionsJson = NullIfWhiteSpace(conditionsJson),
             OriginalOutputsJson = NullIfWhiteSpace(outputsJson),
             IsReadOnlyImport = reasons.Count > 0,
@@ -396,6 +431,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
         if (existing.Direction != imported.Direction
             || existing.TransactionType != imported.TransactionType
             || existing.AutoAdd != imported.AutoAdd
+            || existing.MatchAllConditions != imported.MatchAllConditions
             || !string.Equals(existing.CategoryName ?? string.Empty, imported.CategoryName ?? string.Empty, StringComparison.OrdinalIgnoreCase))
             return false;
 
