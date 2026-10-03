@@ -79,6 +79,7 @@ public sealed class ClientRule : RuleBase
     public Guid ClientId { get; set; }
     public Guid? SourceMasterRuleId { get; set; }
     public string? SourceImportKey { get; set; }
+    public int ExportPriority { get; set; }
 }
 
 public sealed class RuleSet : Entity
@@ -104,6 +105,7 @@ public sealed class ClientRuleAssignment : Entity
     public Guid? ClientRuleId { get; set; }
     public RuleAssignmentStatus Status { get; set; } = RuleAssignmentStatus.Inherited;
     public bool IsExplicit { get; set; }
+    public int ExportPriority { get; set; }
     public RuleOverride? Override { get; set; }
 }
 
