@@ -2,7 +2,6 @@
 @rendermode InteractiveServer
 @using Microsoft.EntityFrameworkCore
 @using RuleManager.Core.Domain
-@using RuleManager.Core.Rules
 @using RuleManager.Data
 @using RuleManager.Data.Services
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
@@ -12,7 +11,7 @@
 <PageTitle>Consistency</PageTitle>
 
 <h1>Consistency</h1>
-<p class="text-muted">Compare each client against the Rule Sets and individual rules they are expected to use.</p>
+<p class="text-muted">Review the Rule Sets and rules currently expected for each client.</p>
 
 <div class="card">
     <div class="card-body p-0">
@@ -28,11 +27,9 @@
                         <tr>
                             <th>Client</th>
                             <th>Rule Sets</th>
-                            <th>Expected</th>
+                            <th>Expected Rules</th>
                             <th>Inherited</th>
-                            <th>Overridden</th>
-                            <th>Missing</th>
-                            <th>Conflict</th>
+                            <th>Direct Rules</th>
                             <th>Overall</th>
                             <th></th>
                         </tr>
@@ -43,23 +40,21 @@
                             <tr>
                                 <td><strong>@row.ClientName</strong></td>
                                 <td>@row.RuleSetCount</td>
-                                <td>@row.Summary.Total</td>
-                                <td>@row.Summary.Inherited</td>
-                                <td>@row.Summary.Overridden</td>
-                                <td>@row.Summary.Missing</td>
-                                <td>@row.Summary.Conflict</td>
+                                <td>@row.ExpectedRuleCount</td>
+                                <td>@row.InheritedRuleCount</td>
+                                <td>@row.DirectRuleCount</td>
                                 <td>
-                                    @if (row.Summary.Total == 0)
+                                    @if (row.ExpectedRuleCount == 0)
                                     {
                                         <span class="badge consistency-none">No rules selected</span>
                                     }
-                                    else if (row.Summary.Issues == 0)
+                                    else if (row.MissingAssignmentCount == 0)
                                     {
                                         <span class="badge consistency-aligned">Aligned</span>
                                     }
                                     else
                                     {
-                                        <span class="badge consistency-issues">@row.Summary.Issues issue(s)</span>
+                                        <span class="badge consistency-issues">Needs review</span>
                                     }
                                 </td>
                                 <td class="text-end">
@@ -119,28 +114,41 @@
                 .Select(x => x.RuleSetId)
                 .ToHashSet();
 
-            var expectedFromSets = setRules
+            var inheritedRuleIds = setRules
                 .Where(x => clientSetIds.Contains(x.RuleSetId))
-                .Select(x => x.MasterRuleId);
+                .Select(x => x.MasterRuleId)
+                .Distinct()
+                .ToArray();
 
             var clientAssignments = assignments
                 .Where(x => x.ClientId == client.Id)
                 .ToArray();
 
-            var explicitRuleIds = clientAssignments
+            var directRuleIds = clientAssignments
                 .Where(x => x.IsExplicit)
-                .Select(x => x.MasterRuleId);
-
-            var expectedRuleIds = expectedFromSets
-                .Concat(explicitRuleIds)
+                .Select(x => x.MasterRuleId)
                 .Distinct()
                 .ToArray();
+
+            var expectedRuleIds = inheritedRuleIds
+                .Concat(directRuleIds)
+                .Distinct()
+                .ToArray();
+
+            var assignedRuleIds = clientAssignments
+                .Select(x => x.MasterRuleId)
+                .ToHashSet();
+
+            var missingAssignmentCount = expectedRuleIds.Count(x => !assignedRuleIds.Contains(x));
 
             rows.Add(new ConsistencyRow(
                 client.Id,
                 client.Name,
                 clientSetIds.Count,
-                ConsistencyCalculator.Calculate(expectedRuleIds, clientAssignments)));
+                expectedRuleIds.Length,
+                inheritedRuleIds.Length,
+                directRuleIds.Length,
+                missingAssignmentCount));
         }
     }
 
@@ -151,5 +159,8 @@
         Guid ClientId,
         string ClientName,
         int RuleSetCount,
-        ConsistencySummary Summary);
+        int ExpectedRuleCount,
+        int InheritedRuleCount,
+        int DirectRuleCount,
+        int MissingAssignmentCount);
 }
