@@ -161,14 +161,25 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                 && x.ChangedAction == ChangedRuleImportAction.CreateNew)
             .ToList();
 
+        var duplicateNewNames = createAsNewItems
+            .Where(x => !string.IsNullOrWhiteSpace(x.NewRuleName))
+            .GroupBy(x => x.NewRuleName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(x => x.Count() > 1);
+
+        if (duplicateNewNames is not null)
+            throw new InvalidOperationException($"More than one changed rule is being created as '{duplicateNewNames.Key}'. Use a unique name for each new reusable rule.");
+
         foreach (var item in createAsNewItems)
         {
             if (string.IsNullOrWhiteSpace(item.NewRuleName))
                 throw new InvalidOperationException($"Enter a new rule name for changed rule '{item.Name}'.");
 
             var newName = item.NewRuleName.Trim();
+            var normalizedNewName = newName.ToUpperInvariant();
+
             var nameExists = await db.MasterRules.AnyAsync(
-                x => x.OrganizationId == organizationId && x.Name.ToLower() == newName.ToLower(),
+                x => x.OrganizationId == organizationId
+                    && x.Name.ToUpper() == normalizedNewName,
                 cancellationToken);
 
             if (nameExists)
