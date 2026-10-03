@@ -213,7 +213,7 @@
                             </strong>
                             <div class="small mt-1">
                                 Changed means the rule name already exists in the library, but its conditions or settings differ.
-                                Selected New and Changed rules can also be added to an existing Rule Set.
+                                Selected New and Changed rules can also be added to an existing Rule Set. Changed rules created as new will use the new name you enter.
                             </div>
                         </div>
                     </div>
@@ -268,6 +268,7 @@
                             <th>Direction</th>
                             <th>Transaction</th>
                             <th>Category</th>
+                            <th>Import Action</th>
                             <th>Notes</th>
                         </tr>
                     </thead>
@@ -293,13 +294,34 @@
                                 <td>@FormatTransactionType(item.TransactionType)</td>
                                 <td>@(item.CategoryName ?? "—")</td>
                                 <td>
+                                    @if (item.Status == RuleImportStatus.Changed)
+                                    {
+                                        <select class="form-select form-select-sm mb-2"
+                                                @bind="item.ChangedAction">
+                                            <option value="@ChangedRuleImportAction.UpdateExisting">Update existing</option>
+                                            <option value="@ChangedRuleImportAction.CreateNew">Create as new</option>
+                                        </select>
+
+                                        @if (item.ChangedAction == ChangedRuleImportAction.CreateNew)
+                                        {
+                                            <input class="form-control form-control-sm"
+                                                   @bind="item.NewRuleName"
+                                                   placeholder="New unique rule name" />
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <span class="small text-muted">—</span>
+                                    }
+                                </td>
+                                <td>
                                     @if (!string.IsNullOrWhiteSpace(item.UnsupportedReason))
                                     {
                                         <span class="small">@item.UnsupportedReason</span>
                                     }
                                     else if (item.Status == RuleImportStatus.Changed)
                                     {
-                                        <span class="small text-muted">Same rule name exists, but the conditions or settings differ. Review this as a potentially different rule before importing.</span>
+                                        <span class="small text-muted">Same rule name exists, but the conditions or settings differ. Choose whether to update the existing reusable rule or create a separate reusable rule.</span>
                                     }
                                     else if (item.Status == RuleImportStatus.Unchanged)
                                     {
@@ -578,6 +600,18 @@
             return;
         }
 
+        var invalidCreateAsNew = previewItems
+            .FirstOrDefault(x => x.Selected
+                && x.Status == RuleImportStatus.Changed
+                && x.ChangedAction == ChangedRuleImportAction.CreateNew
+                && string.IsNullOrWhiteSpace(x.NewRuleName));
+
+        if (invalidCreateAsNew is not null)
+        {
+            message = $"Enter a new unique rule name for changed rule '{invalidCreateAsNew.Name}'.";
+            return;
+        }
+
         if (addImportedRulesToRuleSet && !ResolveRuleSetSelection())
             return;
 
@@ -613,7 +647,7 @@
 
                 var importedNames = previewItems
                     .Where(x => x.Selected && x.Status is RuleImportStatus.New or RuleImportStatus.Changed)
-                    .Select(x => x.Name)
+                    .Select(x => x.EffectiveName)
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
 
@@ -678,8 +712,9 @@
 
         foreach (var item in selectedReusableItems)
         {
+            var effectiveName = item.EffectiveName;
             var rule = allLibraryRules.FirstOrDefault(x =>
-                string.Equals(x.Name, item.Name, StringComparison.OrdinalIgnoreCase));
+                string.Equals(x.Name, effectiveName, StringComparison.OrdinalIgnoreCase));
 
             if (rule is null)
                 continue;
@@ -734,8 +769,9 @@
                 continue;
             }
 
+            var effectiveName = item.EffectiveName;
             var rule = allLibraryRules.FirstOrDefault(x =>
-                string.Equals(x.Name, item.Name, StringComparison.OrdinalIgnoreCase));
+                string.Equals(x.Name, effectiveName, StringComparison.OrdinalIgnoreCase));
 
             if (rule is null)
                 continue;
