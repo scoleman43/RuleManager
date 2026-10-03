@@ -313,6 +313,7 @@ else
     private readonly List<RuleSet> ruleSets = new();
     private readonly List<RuleSetRule> ruleSetRules = new();
     private readonly List<ClientRuleAssignment> assignments = new();
+    private readonly List<ClientRule> clientSpecificRules = new();
     private readonly HashSet<Guid> assignedRuleSetIds = new();
     private readonly HashSet<Guid> expectedFromRuleSets = new();
     private readonly List<string> categoryNames = new();
@@ -418,6 +419,13 @@ else
         assignments.Clear();
         assignments.AddRange(await db.ClientRuleAssignments
             .Where(x => x.ClientId == ClientId)
+            .AsNoTracking()
+            .ToListAsync());
+
+        clientSpecificRules.Clear();
+        clientSpecificRules.AddRange(await db.ClientRules
+            .Where(x => x.ClientId == ClientId && x.IsAccountSpecific)
+            .OrderBy(x => x.Name)
             .AsNoTracking()
             .ToListAsync());
 
