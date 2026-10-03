@@ -1,4 +1,11 @@
 @page "/clients"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using RuleManager.Core.Domain
+@using RuleManager.Data
+@using RuleManager.Data.Services
+@inject IDbContextFactory<RuleManagerDbContext> DbFactory
+@inject WorkspaceService Workspace
 
 <PageTitle>Clients</PageTitle>
 
@@ -7,9 +14,199 @@
         <h1>Clients</h1>
         <p class="text-muted mb-0">Manage QuickBooks client companies and their rule libraries.</p>
     </div>
-    <button class="btn btn-primary" disabled>Add Client</button>
+    <button class="btn btn-primary" @onclick="BeginAdd">Add Client</button>
 </div>
 
-<div class="card"><div class="card-body">
-    <p class="mb-0 text-muted">Client management will be connected to the database in the next milestone.</p>
-</div></div>
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="alert alert-info">@message</div>
+}
+
+@if (showEditor)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">@(editModel.Id.HasValue ? "Edit Client" : "Add Client")</h5>
+            <EditForm Model="editModel" OnValidSubmit="SaveAsync">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Client name</label>
+                        <InputText class="form-control" @bind-Value="editModel.Name" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">QuickBooks company name</label>
+                        <InputText class="form-control" @bind-Value="editModel.QuickBooksCompanyName" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Notes</label>
+                        <InputTextArea class="form-control" @bind-Value="editModel.Notes" />
+                    </div>
+                </div>
+                <div class="mt-3 d-flex gap-2">
+                    <button class="btn btn-primary" type="submit">Save</button>
+                    <button class="btn btn-outline-secondary" type="button" @onclick="CancelEdit">Cancel</button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+<div class="card">
+    <div class="card-body p-0">
+        @if (clients.Count == 0)
+        {
+            <div class="p-4 text-muted">No clients have been added yet.</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Client</th>
+                            <th>QuickBooks Company</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var client in clients)
+                        {
+                            <tr>
+                                <td>
+                                    <strong>@client.Name</strong>
+                                    @if (!string.IsNullOrWhiteSpace(client.Notes))
+                                    {
+                                        <div class="small text-muted">@client.Notes</div>
+                                    }
+                                </td>
+                                <td>@(client.QuickBooksCompanyName ?? "—")</td>
+                                <td>
+                                    <span class="badge @(client.IsActive ? "text-bg-success" : "text-bg-secondary")">
+                                        @(client.IsActive ? "Active" : "Inactive")
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => BeginEdit(client)">Edit</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(client)">
+                                        @(client.IsActive ? "Deactivate" : "Activate")
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly List<Client> clients = new();
+    private ClientEditModel editModel = new();
+    private Guid organizationId;
+    private bool showEditor;
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        clients.Clear();
+        clients.AddRange(await db.Clients
+            .Where(x => x.OrganizationId == organizationId)
+            .OrderByDescending(x => x.IsActive)
+            .ThenBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+    }
+
+    private void BeginAdd()
+    {
+        editModel = new ClientEditModel();
+        showEditor = true;
+        message = null;
+    }
+
+    private void BeginEdit(Client client)
+    {
+        editModel = new ClientEditModel
+        {
+            Id = client.Id,
+            Name = client.Name,
+            QuickBooksCompanyName = client.QuickBooksCompanyName ?? string.Empty,
+            Notes = client.Notes ?? string.Empty
+        };
+        showEditor = true;
+        message = null;
+    }
+
+    private void CancelEdit()
+    {
+        showEditor = false;
+        editModel = new ClientEditModel();
+    }
+
+    private async Task SaveAsync()
+    {
+        var name = editModel.Name.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            message = "Client name is required.";
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        if (editModel.Id.HasValue)
+        {
+            var client = await db.Clients.SingleAsync(x => x.Id == editModel.Id.Value);
+            client.Name = name;
+            client.QuickBooksCompanyName = NullIfWhiteSpace(editModel.QuickBooksCompanyName);
+            client.Notes = NullIfWhiteSpace(editModel.Notes);
+            client.ModifiedUtc = DateTime.UtcNow;
+        }
+        else
+        {
+            db.Clients.Add(new Client
+            {
+                OrganizationId = organizationId,
+                Name = name,
+                QuickBooksCompanyName = NullIfWhiteSpace(editModel.QuickBooksCompanyName),
+                Notes = NullIfWhiteSpace(editModel.Notes)
+            });
+        }
+
+        await db.SaveChangesAsync();
+        showEditor = false;
+        editModel = new ClientEditModel();
+        message = "Client saved.";
+        await LoadAsync();
+    }
+
+    private async Task ToggleActiveAsync(Client client)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.Clients.SingleAsync(x => x.Id == client.Id);
+        entity.IsActive = !entity.IsActive;
+        entity.ModifiedUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private static string? NullIfWhiteSpace(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private sealed class ClientEditModel
+    {
+        public Guid? Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public string QuickBooksCompanyName { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+    }
+}
