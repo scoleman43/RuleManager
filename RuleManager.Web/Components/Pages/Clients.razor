@@ -89,7 +89,7 @@
                                 </td>
                                 <td class="text-end">
                                     <button class="btn btn-sm btn-outline-success me-2"
-                                            @onclick="() => Navigation.NavigateTo($"/clients/{client.Id}/rules")">
+                                            @onclick="() => OpenRules(client.Id)">
                                         Rules
                                     </button>
                                     <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => BeginEdit(client)">Edit</button>
@@ -193,6 +193,9 @@
         message = "Client saved.";
         await LoadAsync();
     }
+
+    private void OpenRules(Guid clientId) =>
+        Navigation.NavigateTo($"/clients/{clientId}/rules");
 
     private async Task ToggleActiveAsync(Client client)
     {
