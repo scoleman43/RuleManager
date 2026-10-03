@@ -2,6 +2,7 @@
 @page "/rule-sets/{RuleSetId:guid}/edit"
 @rendermode InteractiveServer
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.AspNetCore.Components.Routing
 @using RuleManager.Core.Domain
 @using RuleManager.Data
 @using RuleManager.Data.Services
@@ -9,8 +10,12 @@
 @inject WorkspaceService Workspace
 @inject RuleSetAssignmentService RuleSetAssignments
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>@(RuleSetId.HasValue ? "Edit Rule Set" : "New Rule Set")</PageTitle>
+
+<NavigationLock ConfirmExternalNavigation="@HasUnsavedChanges"
+                OnBeforeInternalNavigation="ConfirmInternalNavigation" />
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
@@ -38,9 +43,13 @@
             </div>
         </div>
 
-        <div class="mt-3 d-flex gap-2">
+        <div class="mt-3 d-flex align-items-center gap-2">
             <button class="btn btn-primary" @onclick="SaveSetAsync">Save Rule Set</button>
             <button class="btn btn-outline-secondary" @onclick="BackToRuleSets">Cancel</button>
+            @if (HasUnsavedChanges)
+            {
+                <span class="small text-warning-emphasis ms-2">Unsaved changes</span>
+            }
         </div>
     </div>
 </div>
@@ -128,7 +137,7 @@
                                         <input class="form-check-input"
                                                type="checkbox"
                                                checked="@selected"
-                                               @onchange="e => ToggleRuleAsync(rule.Id, e)" />
+                                               @onchange="e => ToggleRuleSelection(rule.Id, e)" />
                                     </td>
                                     <td>
                                         <strong>@rule.Name</strong>
@@ -181,12 +190,22 @@ else
 
     private readonly List<MasterRule> masterRules = new();
     private readonly HashSet<Guid> selectedRuleIds = new();
+    private readonly HashSet<Guid> originalSelectedRuleIds = new();
     private readonly List<string> categoryNames = new();
+
+    private string originalSetName = string.Empty;
+    private string originalSetDescription = string.Empty;
+    private bool allowNavigation;
 
     private string ruleSearchText = string.Empty;
     private string selectionFilter = "all";
     private string directionFilter = "all";
     private string categoryFilter = "all";
+
+    private bool HasUnsavedChanges =>
+        !string.Equals(setName, originalSetName, StringComparison.Ordinal)
+        || !string.Equals(setDescription, originalSetDescription, StringComparison.Ordinal)
+        || !selectedRuleIds.SetEquals(originalSelectedRuleIds);
 
     private IEnumerable<MasterRule> FilteredRules => masterRules.Where(rule =>
         MatchesRuleSearch(rule)
@@ -222,14 +241,18 @@ else
 
         setName = set.Name;
         setDescription = set.Description ?? string.Empty;
+        originalSetName = setName;
+        originalSetDescription = setDescription;
 
         selectedRuleIds.Clear();
+        originalSelectedRuleIds.Clear();
         foreach (var ruleId in await db.RuleSetRules
             .Where(x => x.RuleSetId == id)
             .Select(x => x.MasterRuleId)
             .ToListAsync())
         {
             selectedRuleIds.Add(ruleId);
+            originalSelectedRuleIds.Add(ruleId);
         }
 
         message = null;
@@ -260,7 +283,10 @@ else
     {
         setName = string.Empty;
         setDescription = string.Empty;
+        originalSetName = string.Empty;
+        originalSetDescription = string.Empty;
         selectedRuleIds.Clear();
+        originalSelectedRuleIds.Clear();
         message = null;
         isError = false;
     }
@@ -278,11 +304,27 @@ else
 
         if (RuleSetId.HasValue)
         {
-            var set = await db.RuleSets.SingleAsync(x => x.Id == RuleSetId.Value);
+            var ruleSetId = RuleSetId.Value;
+            var set = await db.RuleSets.SingleAsync(x => x.Id == ruleSetId);
             set.Name = name;
             set.Description = NullIfWhiteSpace(setDescription);
             set.ModifiedUtc = DateTime.UtcNow;
             await db.SaveChangesAsync();
+
+            var rulesToAdd = selectedRuleIds.Except(originalSelectedRuleIds).ToArray();
+            var rulesToRemove = originalSelectedRuleIds.Except(selectedRuleIds).ToArray();
+
+            foreach (var ruleId in rulesToAdd)
+                await RuleSetAssignments.AddRuleToSetAsync(ruleSetId, ruleId);
+
+            foreach (var ruleId in rulesToRemove)
+                await RuleSetAssignments.RemoveRuleFromSetAsync(ruleSetId, ruleId);
+
+            originalSetName = setName;
+            originalSetDescription = setDescription;
+            originalSelectedRuleIds.Clear();
+            foreach (var ruleId in selectedRuleIds)
+                originalSelectedRuleIds.Add(ruleId);
 
             message = "Rule Set saved.";
             isError = false;
@@ -299,30 +341,21 @@ else
             db.RuleSets.Add(set);
             await db.SaveChangesAsync();
 
+            allowNavigation = true;
             Navigation.NavigateTo($"/rule-sets/{set.Id}/edit");
         }
     }
 
-    private async Task ToggleRuleAsync(Guid masterRuleId, ChangeEventArgs e)
+    private void ToggleRuleSelection(Guid masterRuleId, ChangeEventArgs e)
     {
-        if (!RuleSetId.HasValue)
-            return;
-
         var selected = e.Value is bool value && value;
 
         if (selected)
-        {
-            await RuleSetAssignments.AddRuleToSetAsync(RuleSetId.Value, masterRuleId);
             selectedRuleIds.Add(masterRuleId);
-            message = "Rule added to the Rule Set and inherited by clients already using it.";
-        }
         else
-        {
-            await RuleSetAssignments.RemoveRuleFromSetAsync(RuleSetId.Value, masterRuleId);
             selectedRuleIds.Remove(masterRuleId);
-            message = "Rule removed from the Rule Set.";
-        }
 
+        message = null;
         isError = false;
     }
 
@@ -368,7 +401,39 @@ else
         categoryFilter = "all";
     }
 
-    private void BackToRuleSets() => Navigation.NavigateTo("/rule-sets");
+    private async Task BackToRuleSets()
+    {
+        if (HasUnsavedChanges)
+        {
+            var leave = await JS.InvokeAsync<bool>(
+                "confirm",
+                "You have unsaved changes. Do you want to leave without saving them?");
+
+            if (!leave)
+                return;
+        }
+
+        allowNavigation = true;
+        Navigation.NavigateTo("/rule-sets");
+    }
+
+    private async Task ConfirmInternalNavigation(LocationChangingContext context)
+    {
+        if (allowNavigation || !HasUnsavedChanges)
+            return;
+
+        var leave = await JS.InvokeAsync<bool>(
+            "confirm",
+            "You have unsaved changes. Do you want to leave without saving them?");
+
+        if (!leave)
+        {
+            context.PreventNavigation();
+            return;
+        }
+
+        allowNavigation = true;
+    }
 
     private void SetError(string text)
     {
