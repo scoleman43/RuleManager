@@ -8,6 +8,7 @@
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject WorkspaceService Workspace
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>Rules</PageTitle>
 
@@ -21,7 +22,7 @@
 
 @if (!string.IsNullOrWhiteSpace(message))
 {
-    <div class="alert alert-success">@message</div>
+    <div class="alert @(isError ? "alert-danger" : "alert-success")">@message</div>
 }
 
 <div class="card mb-4">
@@ -166,7 +167,7 @@
                             <th>Transaction Type</th>
                             <th>Category</th>
                             <th>Status</th>
-                            <th class="text-end" style="min-width: 300px;">Actions</th>
+                            <th class="text-end" style="min-width: 360px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -199,6 +200,7 @@
                                         <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(rule)">
                                             @(rule.IsActive ? "Deactivate" : "Activate")
                                         </button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteRuleAsync(rule)">Delete</button>
                                     </div>
                                 </td>
                             </tr>
@@ -221,6 +223,7 @@
     private string transactionFilter = "all";
     private string categoryFilter = "all";
     private string? message;
+    private bool isError;
 
     private MasterRule? batchRule;
     private readonly List<Client> activeClients = new();
@@ -372,6 +375,7 @@
                 message = matches.Count == 0
                     ? "Enter a client name or select a client from the dropdown."
                     : "More than one client matches. Select the client you want from the dropdown.";
+                isError = true;
                 return;
             }
 
@@ -404,11 +408,13 @@
         else
         {
             message = "That rule is already assigned directly to this client.";
+            isError = true;
             return;
         }
 
         var clientName = activeClients.First(x => x.Id == clientId).Name;
         message = $"Rule assigned directly to {clientName}.";
+        isError = false;
         await OpenBatchAssignAsync(batchRule);
     }
 
@@ -421,6 +427,67 @@
         await db.SaveChangesAsync();
 
         message = entity.IsActive ? "Rule activated." : "Rule deactivated.";
+        isError = false;
+        await LoadAsync();
+    }
+
+    private async Task DeleteRuleAsync(MasterRule rule)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var clientAssignmentCount = await db.ClientRuleAssignments
+            .CountAsync(x => x.MasterRuleId == rule.Id);
+
+        var ruleSetCount = await db.RuleSetRules
+            .CountAsync(x => x.MasterRuleId == rule.Id);
+
+        var clientRuleReferenceCount = await db.ClientRules
+            .CountAsync(x => x.SourceMasterRuleId == rule.Id);
+
+        if (clientAssignmentCount > 0 || ruleSetCount > 0 || clientRuleReferenceCount > 0)
+        {
+            var references = new List<string>();
+
+            if (ruleSetCount > 0)
+                references.Add($"{ruleSetCount} Rule Set(s)");
+
+            if (clientAssignmentCount > 0)
+                references.Add($"{clientAssignmentCount} client assignment(s)");
+
+            if (clientRuleReferenceCount > 0)
+                references.Add($"{clientRuleReferenceCount} client-specific rule reference(s)");
+
+            message = $"'{rule.Name}' cannot be deleted because it is still referenced by {string.Join(", ", references)}. Remove those references first, or deactivate the rule instead.";
+            isError = true;
+            return;
+        }
+
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Delete '{rule.Name}' permanently? This cannot be undone.");
+
+        if (!confirmed)
+            return;
+
+        var entity = await db.MasterRules
+            .SingleOrDefaultAsync(x => x.Id == rule.Id && x.OrganizationId == organizationId);
+
+        if (entity is null)
+        {
+            message = "The rule no longer exists.";
+            isError = true;
+            await LoadAsync();
+            return;
+        }
+
+        db.MasterRules.Remove(entity);
+        await db.SaveChangesAsync();
+
+        if (batchRule?.Id == rule.Id)
+            CloseBatchAssign();
+
+        message = $"Rule '{rule.Name}' deleted.";
+        isError = false;
         await LoadAsync();
     }
 
