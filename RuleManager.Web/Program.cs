@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using RuleManager.Data;
+using RuleManager.Data.Services;
 using RuleManager.Web.Components;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -8,10 +9,12 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 var connectionString = builder.Configuration.GetConnectionString("RuleManager")
-    ?? "Host=localhost;Port=5432;Database=rulemanager;Username=postgres;Password=postgres";
+    ?? throw new InvalidOperationException("Connection string 'RuleManager' is not configured.");
 
 builder.Services.AddDbContextFactory<RuleManagerDbContext>(options =>
     options.UseNpgsql(connectionString));
+
+builder.Services.AddScoped<WorkspaceService>();
 
 var app = builder.Build();
 
@@ -19,6 +22,10 @@ if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
     app.UseHsts();
+}
+else
+{
+    await DatabaseInitializer.InitializeAsync(app.Services);
 }
 
 app.UseHttpsRedirection();
