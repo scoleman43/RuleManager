@@ -1,0 +1,22 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, feature/web-foundation ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore RuleManager.sln
+      - name: Build
+        run: dotnet build RuleManager.sln --configuration Release --no-restore
+      - name: Test
+        run: dotnet test RuleManager.Tests/RuleManager.Tests.csproj --configuration Release --no-build
