@@ -404,12 +404,23 @@
 
         if (assignment is null)
         {
+            var assignmentMax = await db.ClientRuleAssignments
+                .Where(x => x.ClientId == clientId)
+                .Select(x => (int?)x.ExportPriority)
+                .MaxAsync() ?? 0;
+
+            var clientRuleMax = await db.ClientRules
+                .Where(x => x.ClientId == clientId)
+                .Select(x => (int?)x.ExportPriority)
+                .MaxAsync() ?? 0;
+
             db.ClientRuleAssignments.Add(new ClientRuleAssignment
             {
                 ClientId = clientId,
                 MasterRuleId = batchRule.Id,
                 Status = RuleAssignmentStatus.Inherited,
-                IsExplicit = true
+                IsExplicit = true,
+                ExportPriority = Math.Max(assignmentMax, clientRuleMax) + 1
             });
 
             await db.SaveChangesAsync();
