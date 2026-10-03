@@ -215,6 +215,18 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
 
         if (clientId.HasValue)
         {
+            var assignmentMax = await db.ClientRuleAssignments
+                .Where(x => x.ClientId == clientId.Value)
+                .Select(x => (int?)x.ExportPriority)
+                .MaxAsync(cancellationToken) ?? 0;
+
+            var clientRuleMax = await db.ClientRules
+                .Where(x => x.ClientId == clientId.Value)
+                .Select(x => (int?)x.ExportPriority)
+                .MaxAsync(cancellationToken) ?? 0;
+
+            var nextPriority = Math.Max(assignmentMax, clientRuleMax) + 1;
+
             foreach (var item in selectedClientSpecificRules)
             {
                 var entity = await db.ClientRules
@@ -227,7 +239,8 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                     entity = new ClientRule
                     {
                         ClientId = clientId.Value,
-                        SourceImportKey = item.Name
+                        SourceImportKey = item.Name,
+                        ExportPriority = nextPriority++
                     };
                     db.ClientRules.Add(entity);
                     clientSpecificAdded++;
