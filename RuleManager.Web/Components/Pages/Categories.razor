@@ -75,7 +75,7 @@
                                 <td>@category.MainCategory</td>
                                 <td>@(category.SubCategory ?? "—")</td>
                                 <td>
-                                    <span class="badge @(category.IsActive ? "text-bg-success" : "text-bg-secondary")">
+                                    <span class="badge @(category.IsActive ? "status-badge-active" : "status-badge-inactive")">
                                         @(category.IsActive ? "Active" : "Inactive")
                                     </span>
                                 </td>
