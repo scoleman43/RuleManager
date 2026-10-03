@@ -1,19 +1,233 @@
 @page "/imports-exports"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.EntityFrameworkCore
+@using RuleManager.Core.Domain
+@using RuleManager.Data
+@using RuleManager.Data.Services
+@inject IDbContextFactory<RuleManagerDbContext> DbFactory
+@inject WorkspaceService Workspace
 
 <PageTitle>Imports / Exports</PageTitle>
 
 <h1>Imports / Exports</h1>
-<p class="text-muted">Import existing QuickBooks rule files, compare them to master rules, and generate client-specific import files.</p>
+<p class="text-muted">Import existing QuickBooks rule files and generate client-specific rule exports.</p>
 
-<div class="row g-3">
-    <div class="col-md-6"><div class="card h-100"><div class="card-body">
-        <h5>Import</h5>
-        <p class="text-muted">Upload an exported QuickBooks rule workbook for a selected client.</p>
-        <button class="btn btn-outline-primary" disabled>Import Rules</button>
-    </div></div></div>
-    <div class="col-md-6"><div class="card h-100"><div class="card-body">
-        <h5>Export</h5>
-        <p class="text-muted">Generate a QuickBooks-compatible workbook from selected client rules.</p>
-        <button class="btn btn-outline-primary" disabled>Generate Export</button>
-    </div></div></div>
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="alert alert-info">@message</div>
+}
+
+<div class="row g-3 mb-4">
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5>Import</h5>
+                <p class="text-muted">Upload an exported QuickBooks rule workbook for a selected client.</p>
+                <button class="btn btn-outline-primary" @onclick="OpenImport">Import Rules</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5>Export</h5>
+                <p class="text-muted">Generate a QuickBooks-compatible workbook from a client's assigned rules.</p>
+                <button class="btn btn-outline-primary" @onclick="OpenExport">Generate Export</button>
+            </div>
+        </div>
+    </div>
 </div>
+
+@if (showImport)
+{
+    <div class="card mb-4 border-primary">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h5 class="card-title mb-1">Import Rules</h5>
+                    <div class="text-muted">Choose the client and the QuickBooks .xls rule export.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseImport">Close</button>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-lg-6">
+                    <label class="form-label">Client</label>
+                    <select class="form-select" @bind="importClientId">
+                        <option value="">-- Select client --</option>
+                        @foreach (var client in clients)
+                        {
+                            <option value="@client.Id">@client.Name</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="col-lg-6">
+                    <label class="form-label">QuickBooks rule file</label>
+                    <InputFile class="form-control" OnChange="HandleImportFile" accept=".xls" />
+                    <div class="form-text">Use the .xls file exported from QuickBooks Online.</div>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(importFileName))
+            {
+                <div class="alert alert-secondary mt-3 mb-0">
+                    Selected: <strong>@importFileName</strong>
+                    @if (importFileSize > 0)
+                    {
+                        <span class="text-muted">(@FormatFileSize(importFileSize))</span>
+                    }
+                </div>
+            }
+
+            <div class="mt-3">
+                <button class="btn btn-primary" @onclick="StartImportAsync">Continue Import</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showExport)
+{
+    <div class="card mb-4 border-primary">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h5 class="card-title mb-1">Generate Export</h5>
+                    <div class="text-muted">Choose the client whose effective assigned rules should be exported.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseExport">Close</button>
+            </div>
+
+            <div class="row g-3 align-items-end">
+                <div class="col-lg-8">
+                    <label class="form-label">Client</label>
+                    <select class="form-select" @bind="exportClientId">
+                        <option value="">-- Select client --</option>
+                        @foreach (var client in clients)
+                        {
+                            <option value="@client.Id">@client.Name</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="col-lg-4">
+                    <button class="btn btn-primary w-100" @onclick="StartExportAsync">Prepare Export</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private readonly List<Client> clients = new();
+
+    private bool showImport;
+    private bool showExport;
+    private string importClientId = string.Empty;
+    private string exportClientId = string.Empty;
+    private string? importFileName;
+    private long importFileSize;
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        clients.AddRange(await db.Clients
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+    }
+
+    private void OpenImport()
+    {
+        showImport = true;
+        showExport = false;
+        message = null;
+    }
+
+    private void CloseImport()
+    {
+        showImport = false;
+        importClientId = string.Empty;
+        importFileName = null;
+        importFileSize = 0;
+    }
+
+    private void OpenExport()
+    {
+        showExport = true;
+        showImport = false;
+        message = null;
+    }
+
+    private void CloseExport()
+    {
+        showExport = false;
+        exportClientId = string.Empty;
+    }
+
+    private void HandleImportFile(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        importFileName = file.Name;
+        importFileSize = file.Size;
+
+        if (!file.Name.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+            message = "QuickBooks rule imports must use the .xls export format.";
+        else
+            message = null;
+    }
+
+    private Task StartImportAsync()
+    {
+        if (!Guid.TryParse(importClientId, out _))
+        {
+            message = "Select the client you want to import rules for.";
+            return Task.CompletedTask;
+        }
+
+        if (string.IsNullOrWhiteSpace(importFileName))
+        {
+            message = "Choose a QuickBooks .xls rule file.";
+            return Task.CompletedTask;
+        }
+
+        if (!importFileName.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+        {
+            message = "The selected file must be a QuickBooks .xls rule export.";
+            return Task.CompletedTask;
+        }
+
+        message = "Import workflow is ready. The next implementation step is parsing the QuickBooks workbook, comparing its rules, and presenting the review screen before anything is saved.";
+        return Task.CompletedTask;
+    }
+
+    private Task StartExportAsync()
+    {
+        if (!Guid.TryParse(exportClientId, out _))
+        {
+            message = "Select the client you want to export.";
+            return Task.CompletedTask;
+        }
+
+        message = "Export workflow is ready. The next implementation step is generating the QuickBooks-compatible .xls workbook from this client's effective rules.";
+        return Task.CompletedTask;
+    }
+
+    private static string FormatFileSize(long bytes)
+    {
+        if (bytes < 1024)
+            return $"{bytes} B";
+
+        if (bytes < 1024 * 1024)
+            return $"{bytes / 1024d:0.0} KB";
+
+        return $"{bytes / 1024d / 1024d:0.0} MB";
+    }
+}
