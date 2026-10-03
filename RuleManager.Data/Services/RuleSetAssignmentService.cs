@@ -33,6 +33,7 @@ public sealed class RuleSetAssignmentService(IDbContextFactory<RuleManagerDbCont
             .ToListAsync(cancellationToken);
 
         var existingSet = existing.ToHashSet();
+        var nextPriority = await GetNextExportPriorityAsync(db, clientId, cancellationToken);
 
         foreach (var masterRuleId in masterRuleIds.Where(x => !existingSet.Contains(x)))
         {
@@ -41,7 +42,8 @@ public sealed class RuleSetAssignmentService(IDbContextFactory<RuleManagerDbCont
                 ClientId = clientId,
                 MasterRuleId = masterRuleId,
                 Status = RuleAssignmentStatus.Inherited,
-                IsExplicit = false
+                IsExplicit = false,
+                ExportPriority = nextPriority++
             });
         }
 
@@ -132,16 +134,37 @@ public sealed class RuleSetAssignmentService(IDbContextFactory<RuleManagerDbCont
 
         foreach (var clientId in clientIds.Where(x => !alreadyAssignedSet.Contains(x)))
         {
+            var priority = await GetNextExportPriorityAsync(db, clientId, cancellationToken);
+
             db.ClientRuleAssignments.Add(new ClientRuleAssignment
             {
                 ClientId = clientId,
                 MasterRuleId = masterRuleId,
                 Status = RuleAssignmentStatus.Inherited,
-                IsExplicit = false
+                IsExplicit = false,
+                ExportPriority = priority
             });
         }
 
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    private static async Task<int> GetNextExportPriorityAsync(
+        RuleManagerDbContext db,
+        Guid clientId,
+        CancellationToken cancellationToken)
+    {
+        var assignmentMax = await db.ClientRuleAssignments
+            .Where(x => x.ClientId == clientId)
+            .Select(x => (int?)x.ExportPriority)
+            .MaxAsync(cancellationToken) ?? 0;
+
+        var clientRuleMax = await db.ClientRules
+            .Where(x => x.ClientId == clientId)
+            .Select(x => (int?)x.ExportPriority)
+            .MaxAsync(cancellationToken) ?? 0;
+
+        return Math.Max(assignmentMax, clientRuleMax) + 1;
     }
 
     public async Task RemoveRuleFromSetAsync(Guid ruleSetId, Guid masterRuleId, CancellationToken cancellationToken = default)
