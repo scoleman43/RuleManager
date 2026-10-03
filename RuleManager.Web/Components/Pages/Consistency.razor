@@ -51,15 +51,15 @@
                                 <td>
                                     @if (row.Summary.Total == 0)
                                     {
-                                        <span class="badge text-bg-secondary">No rules selected</span>
+                                        <span class="badge consistency-none">No rules selected</span>
                                     }
                                     else if (row.Summary.Issues == 0)
                                     {
-                                        <span class="badge text-bg-success">Aligned</span>
+                                        <span class="badge consistency-aligned">Aligned</span>
                                     }
                                     else
                                     {
-                                        <span class="badge text-bg-warning">@row.Summary.Issues issue(s)</span>
+                                        <span class="badge consistency-issues">@row.Summary.Issues issue(s)</span>
                                     }
                                 </td>
                                 <td class="text-end">
