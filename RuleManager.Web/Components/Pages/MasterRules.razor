@@ -169,7 +169,7 @@
                             <th>Transaction Type</th>
                             <th>Category</th>
                             <th>Status</th>
-                            <th class="text-end" style="min-width: 360px;">Actions</th>
+                            <th class="text-end" style="min-width: 190px;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -197,12 +197,25 @@
                                 </td>
                                 <td class="text-end">
                                     <div class="d-inline-flex align-items-center justify-content-end gap-2 flex-nowrap rule-actions">
-                                        <button class="btn btn-sm btn-outline-success" @onclick="() => OpenBatchAssignAsync(rule)">Assign Directly</button>
                                         <button class="btn btn-sm btn-outline-primary" @onclick="() => EditRule(rule.Id)">Edit</button>
-                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(rule)">
-                                            @(rule.IsActive ? "Deactivate" : "Activate")
-                                        </button>
-                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteRuleAsync(rule)">Delete</button>
+
+                                        <details class="rule-action-menu">
+                                            <summary class="btn btn-sm btn-outline-secondary">
+                                                Actions <span aria-hidden="true">▾</span>
+                                            </summary>
+                                            <div class="rule-action-menu-panel">
+                                                <button class="rule-action-menu-item" @onclick="() => OpenBatchAssignAsync(rule)">
+                                                    Assign Directly
+                                                </button>
+                                                <button class="rule-action-menu-item" @onclick="() => ToggleActiveAsync(rule)">
+                                                    @(rule.IsActive ? "Deactivate" : "Activate")
+                                                </button>
+                                                <div class="rule-action-menu-divider"></div>
+                                                <button class="rule-action-menu-item rule-action-menu-danger" @onclick="() => DeleteRuleAsync(rule)">
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </details>
                                     </div>
                                 </td>
                             </tr>
