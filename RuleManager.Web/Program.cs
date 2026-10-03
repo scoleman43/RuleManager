@@ -15,6 +15,7 @@ builder.Services.AddDbContextFactory<RuleManagerDbContext>(options =>
     options.UseNpgsql(connectionString));
 
 builder.Services.AddScoped<WorkspaceService>();
+builder.Services.AddScoped<RuleSetAssignmentService>();
 
 var app = builder.Build();
 
