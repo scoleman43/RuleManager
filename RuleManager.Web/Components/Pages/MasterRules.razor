@@ -89,60 +89,62 @@
 
 @if (batchRule is not null)
 {
-    <div class="card mb-4 border-primary">
-        <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start mb-3">
+    <div class="rule-modal-backdrop" @onclick="CloseBatchAssign">
+        <div class="rule-modal-dialog" @onclick:stopPropagation="true">
+            <div class="rule-modal-header">
                 <div>
-                    <h5 class="card-title mb-1">Assign "@batchRule.Name" Directly</h5>
-                    <div class="text-muted">Find a client by name or choose one from the dropdown.</div>
+                    <div class="rule-modal-eyebrow">Direct assignment</div>
+                    <h5 class="mb-1">Assign "@batchRule.Name"</h5>
+                    <div class="text-muted small">Choose the client that should receive this reusable rule.</div>
                 </div>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="CloseBatchAssign">Close</button>
             </div>
 
-            @if (activeClients.Count == 0)
-            {
-                <div class="text-muted">No active clients are available.</div>
-            }
-            else
-            {
-                <div class="row g-3 align-items-end">
-                    <div class="col-lg-5">
-                        <label class="form-label">Find client</label>
-                        <input class="form-control"
-                               @bind="clientSearchText"
-                               @bind:event="oninput"
-                               placeholder="Start typing a client name..." />
-                    </div>
-
-                    <div class="col-lg-5">
-                        <label class="form-label">Client</label>
-                        <select class="form-select" @bind="selectedDirectClientId">
-                            <option value="">-- Select client --</option>
-                            @foreach (var client in DirectClientOptions)
-                            {
-                                <option value="@client.Id">
-                                    @client.Name@(directAssignedClientIds.Contains(client.Id) ? " — already assigned directly" : "")
-                                </option>
-                            }
-                        </select>
-                    </div>
-
-                    <div class="col-lg-2">
-                        <button class="btn btn-primary w-100" @onclick="AssignDirectToClientAsync">
-                            Assign
-                        </button>
-                    </div>
-                </div>
-
-                @if (!string.IsNullOrWhiteSpace(clientSearchText) && !DirectClientOptions.Any())
+            <div class="rule-modal-body">
+                @if (activeClients.Count == 0)
                 {
-                    <div class="text-muted small mt-2">No active clients match that name.</div>
+                    <div class="text-muted">No active clients are available.</div>
                 }
+                else
+                {
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Find client</label>
+                            <input class="form-control"
+                                   @bind="clientSearchText"
+                                   @bind:event="oninput"
+                                   placeholder="Start typing a client name..." />
+                        </div>
 
-                <div class="form-text mt-2">
-                    Direct assignment is intended for one-off client needs. Rules used broadly should be added to a Rule Set.
-                </div>
-            }
+                        <div class="col-md-6">
+                            <label class="form-label">Client</label>
+                            <select class="form-select" @bind="selectedDirectClientId">
+                                <option value="">-- Select client --</option>
+                                @foreach (var client in DirectClientOptions)
+                                {
+                                    <option value="@client.Id">
+                                        @client.Name@(directAssignedClientIds.Contains(client.Id) ? " — already assigned directly" : "")
+                                    </option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrWhiteSpace(clientSearchText) && !DirectClientOptions.Any())
+                    {
+                        <div class="text-muted small mt-2">No active clients match that name.</div>
+                    }
+
+                    <div class="form-text mt-3">
+                        Direct assignment is intended for one-off client needs. Rules used broadly should be added to a Rule Set.
+                    </div>
+                }
+            </div>
+
+            <div class="rule-modal-footer">
+                <button class="btn btn-outline-secondary" @onclick="CloseBatchAssign">Cancel</button>
+                <button class="btn btn-primary" @onclick="AssignDirectToClientAsync" disabled="@(activeClients.Count == 0)">Assign Rule</button>
+            </div>
         </div>
     </div>
 }
