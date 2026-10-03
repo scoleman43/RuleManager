@@ -303,6 +303,44 @@ else
             </div>
         }
     </div>
+
+    @if (clientSpecificRules.Count > 0)
+    {
+        <div class="card mt-4">
+            <div class="card-body">
+                <h5 class="card-title mb-1">Client-Specific Imported Rules (@clientSpecificRules.Count)</h5>
+                <div class="text-muted small mb-3">
+                    These rules contain QuickBooks account-specific data. They belong only to this client and are preserved exactly for export.
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0 align-middle">
+                        <thead>
+                            <tr>
+                                <th>Rule</th>
+                                <th>Direction</th>
+                                <th>Transaction</th>
+                                <th>Account / Category</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var rule in clientSpecificRules)
+                            {
+                                <tr>
+                                    <td><strong>@rule.Name</strong></td>
+                                    <td>@(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")</td>
+                                    <td>@FormatTransactionType(rule.TransactionType)</td>
+                                    <td>@(rule.CategoryName ?? "—")</td>
+                                    <td><span class="badge status-badge-client-specific">Client-specific</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
 }
 
 @code {
