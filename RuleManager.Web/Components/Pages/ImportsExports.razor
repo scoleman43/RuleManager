@@ -82,6 +82,46 @@
                 </div>
             }
 
+            <div class="border rounded p-3 mt-3">
+                <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           @bind="assignRuleSetAfterImport"
+                           id="assignRuleSetAfterImport" />
+                    <label class="form-check-label" for="assignRuleSetAfterImport">
+                        Automatically assign this client to a Rule Set after the import is completed
+                    </label>
+                </div>
+
+                @if (assignRuleSetAfterImport)
+                {
+                    <div class="row g-3 mt-1">
+                        <div class="col-lg-6">
+                            <label class="form-label">Find Rule Set</label>
+                            <input class="form-control"
+                                   @bind="ruleSetSearchText"
+                                   @bind:event="oninput"
+                                   placeholder="Start typing a Rule Set name..." />
+                        </div>
+
+                        <div class="col-lg-6">
+                            <label class="form-label">Rule Set</label>
+                            <select class="form-select" @bind="importRuleSetId">
+                                <option value="">-- Select Rule Set --</option>
+                                @foreach (var set in ImportRuleSetOptions)
+                                {
+                                    <option value="@set.Id">@set.Name</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="form-text mt-2">
+                        The Rule Set will be applied only after the import is successfully reviewed and completed.
+                    </div>
+                }
+            </div>
+
             <div class="mt-3">
                 <button class="btn btn-primary" @onclick="StartImportAsync">Continue Import</button>
             </div>
@@ -123,6 +163,7 @@
 
 @code {
     private readonly List<Client> clients = new();
+    private readonly List<RuleSet> ruleSets = new();
 
     private bool showImport;
     private bool showExport;
@@ -130,6 +171,9 @@
     private string exportClientId = string.Empty;
     private string? importFileName;
     private long importFileSize;
+    private bool assignRuleSetAfterImport;
+    private string ruleSetSearchText = string.Empty;
+    private string importRuleSetId = string.Empty;
     private string? message;
 
     protected override async Task OnInitializedAsync()
@@ -138,6 +182,12 @@
 
         await using var db = await DbFactory.CreateDbContextAsync();
         clients.AddRange(await db.Clients
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+
+        ruleSets.AddRange(await db.RuleSets
             .Where(x => x.OrganizationId == organizationId && x.IsActive)
             .OrderBy(x => x.Name)
             .AsNoTracking()
@@ -157,6 +207,9 @@
         importClientId = string.Empty;
         importFileName = null;
         importFileSize = 0;
+        assignRuleSetAfterImport = false;
+        ruleSetSearchText = string.Empty;
+        importRuleSetId = string.Empty;
     }
 
     private void OpenExport()
@@ -184,6 +237,11 @@
             message = null;
     }
 
+    private IEnumerable<RuleSet> ImportRuleSetOptions =>
+        ruleSets.Where(set =>
+            string.IsNullOrWhiteSpace(ruleSetSearchText)
+            || set.Name.Contains(ruleSetSearchText.Trim(), StringComparison.OrdinalIgnoreCase));
+
     private Task StartImportAsync()
     {
         if (!Guid.TryParse(importClientId, out _))
@@ -204,7 +262,26 @@
             return Task.CompletedTask;
         }
 
-        message = "Import workflow is ready. The next implementation step is parsing the QuickBooks workbook, comparing its rules, and presenting the review screen before anything is saved.";
+        if (assignRuleSetAfterImport && !Guid.TryParse(importRuleSetId, out _))
+        {
+            var matches = ImportRuleSetOptions.ToList();
+
+            if (matches.Count == 1)
+                importRuleSetId = matches[0].Id.ToString();
+            else
+            {
+                message = matches.Count == 0
+                    ? "Choose the Rule Set you want assigned after import."
+                    : "More than one Rule Set matches. Select the Rule Set from the dropdown.";
+                return Task.CompletedTask;
+            }
+        }
+
+        var groupMessage = assignRuleSetAfterImport
+            ? " The selected Rule Set will be assigned to the client after the import is successfully reviewed and completed."
+            : string.Empty;
+
+        message = "Import workflow is ready. The next implementation step is parsing the QuickBooks workbook, comparing its rules, and presenting the review screen before anything is saved." + groupMessage;
         return Task.CompletedTask;
     }
 
