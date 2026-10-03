@@ -6,128 +6,107 @@
 @using RuleManager.Data.Services
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject WorkspaceService Workspace
-@inject RuleSetAssignmentService RuleSetAssignments
+@inject NavigationManager Navigation
 
 <PageTitle>Rule Sets</PageTitle>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <div>
         <h1>Rule Sets</h1>
-        <p class="text-muted mb-0">Group reusable master rules for onboarding and automatic inheritance.</p>
+        <p class="text-muted mb-0">Create and manage reusable groups of rules.</p>
     </div>
-    <button class="btn btn-primary" @onclick="BeginAddSet">New Rule Set</button>
+    <button class="btn btn-primary" @onclick="CreateRuleSet">New Rule Set</button>
 </div>
 
 @if (!string.IsNullOrWhiteSpace(message))
 {
-    <div class="alert alert-info">@message</div>
+    <div class="alert alert-success">@message</div>
 }
 
-@if (showSetEditor)
-{
-    <div class="card mb-4">
-        <div class="card-body">
-            <h5 class="card-title">@(editingSetId.HasValue ? "Edit Rule Set" : "New Rule Set")</h5>
-            <div class="row g-3">
-                <div class="col-md-6">
-                    <label class="form-label">Name</label>
-                    <input class="form-control" @bind="setName" placeholder="Example: Base Business Rules" />
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label">Description</label>
-                    <input class="form-control" @bind="setDescription" />
-                </div>
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3 align-items-end">
+            <div class="col-md-8 col-lg-6">
+                <label class="form-label">Search</label>
+                <input class="form-control"
+                       @bind="searchText"
+                       @bind:event="oninput"
+                       placeholder="Rule Set name or description..." />
             </div>
-            <div class="mt-3 d-flex gap-2">
-                <button class="btn btn-primary" @onclick="SaveSetAsync">Save Rule Set</button>
-                <button class="btn btn-outline-secondary" @onclick="CancelSetEdit">Cancel</button>
+            <div class="col-auto">
+                <button class="btn btn-outline-secondary" @onclick="ClearSearch">Clear</button>
             </div>
+        </div>
+
+        <div class="text-muted small mt-3">
+            Showing @FilteredRuleSets.Count() of @ruleSets.Count Rule Set(s)
         </div>
     </div>
-}
-
-<div class="row g-3">
-    @foreach (var set in ruleSets)
-    {
-        var setRuleIds = RulesForSet(set.Id).ToHashSet();
-
-        <div class="col-12">
-            <div class="card">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start mb-3">
-                        <div>
-                            <h5 class="card-title mb-1">@set.Name</h5>
-                            <div class="text-muted">@(set.Description ?? "No description")</div>
-                            <div class="small text-muted mt-1">@setRuleIds.Count rule(s)</div>
-                        </div>
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-sm btn-outline-primary" @onclick="() => BeginEditSet(set)">Edit</button>
-                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleSetActiveAsync(set)">
-                                @(set.IsActive ? "Deactivate" : "Activate")
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="row g-2">
-                        @foreach (var rule in masterRules)
-                        {
-                            var ruleId = rule.Id;
-                            var selected = setRuleIds.Contains(ruleId);
-
-                            <div class="col-md-6 col-lg-4">
-                                <div class="border rounded p-2 h-100">
-                                    <div class="form-check">
-                                        <input class="form-check-input"
-                                               type="checkbox"
-                                               checked="@selected"
-                                               @onchange="e => ToggleRuleInSetAsync(set.Id, ruleId, e)" />
-                                        <label class="form-check-label">
-                                            <strong>@rule.Name</strong>
-                                            <div class="small text-muted">
-                                                @(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")
-                                                · @(rule.CategoryName ?? "No category")
-                                            </div>
-                                        </label>
-                                    </div>
-                                </div>
-                            </div>
-                        }
-                    </div>
-
-                    @if (masterRules.Count == 0)
-                    {
-                        <div class="text-muted">Create Master Rules first, then add them to this set.</div>
-                    }
-
-                    <div class="alert alert-secondary mt-3 mb-0">
-                        Clients assigned to this Rule Set automatically inherit newly added rules.
-                    </div>
-                </div>
-            </div>
-        </div>
-    }
 </div>
 
-@if (ruleSets.Count == 0)
-{
-    <div class="card">
-        <div class="card-body text-muted">
-            No Rule Sets exist yet. Create a Base Business Rules set to start grouping your standard rules.
-        </div>
+<div class="card">
+    <div class="card-body p-0">
+        @if (!FilteredRuleSets.Any())
+        {
+            <div class="p-4 text-muted">
+                @(ruleSets.Count == 0 ? "No Rule Sets have been created yet." : "No Rule Sets match your search.")
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Rule Set</th>
+                            <th>Description</th>
+                            <th>Rules</th>
+                            <th>Clients</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var set in FilteredRuleSets)
+                        {
+                            <tr>
+                                <td><strong>@set.Name</strong></td>
+                                <td>@(set.Description ?? "—")</td>
+                                <td>@RuleCount(set.Id)</td>
+                                <td>@ClientCount(set.Id)</td>
+                                <td>
+                                    <span class="badge @(set.IsActive ? "text-bg-success" : "text-bg-secondary")">
+                                        @(set.IsActive ? "Active" : "Inactive")
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => EditRuleSet(set.Id)">Edit</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleSetActiveAsync(set)">
+                                        @(set.IsActive ? "Deactivate" : "Activate")
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
     </div>
-}
+</div>
 
 @code {
     private Guid organizationId;
     private readonly List<RuleSet> ruleSets = new();
-    private readonly List<MasterRule> masterRules = new();
-    private readonly List<RuleSetRule> ruleSetRules = new();
-
-    private bool showSetEditor;
-    private Guid? editingSetId;
-    private string setName = string.Empty;
-    private string setDescription = string.Empty;
+    private readonly Dictionary<Guid, int> ruleCounts = new();
+    private readonly Dictionary<Guid, int> clientCounts = new();
+    private string searchText = string.Empty;
     private string? message;
+
+    private IEnumerable<RuleSet> FilteredRuleSets =>
+        ruleSets.Where(set =>
+            string.IsNullOrWhiteSpace(searchText)
+            || set.Name.Contains(searchText.Trim(), StringComparison.OrdinalIgnoreCase)
+            || (set.Description?.Contains(searchText.Trim(), StringComparison.OrdinalIgnoreCase) ?? false));
 
     protected override async Task OnInitializedAsync()
     {
@@ -147,104 +126,40 @@
             .AsNoTracking()
             .ToListAsync());
 
-        masterRules.Clear();
-        masterRules.AddRange(await db.MasterRules
-            .Where(x => x.OrganizationId == organizationId && x.IsActive)
-            .OrderBy(x => x.Name)
-            .AsNoTracking()
-            .ToListAsync());
+        var ids = ruleSets.Select(x => x.Id).ToArray();
 
-        var setIds = ruleSets.Select(x => x.Id).ToArray();
-        ruleSetRules.Clear();
-        ruleSetRules.AddRange(await db.RuleSetRules
-            .Where(x => setIds.Contains(x.RuleSetId))
-            .AsNoTracking()
-            .ToListAsync());
-    }
-
-    private IEnumerable<Guid> RulesForSet(Guid ruleSetId) =>
-        ruleSetRules.Where(x => x.RuleSetId == ruleSetId).Select(x => x.MasterRuleId);
-
-    private void BeginAddSet()
-    {
-        editingSetId = null;
-        setName = string.Empty;
-        setDescription = string.Empty;
-        showSetEditor = true;
-        message = null;
-    }
-
-    private void BeginEditSet(RuleSet set)
-    {
-        editingSetId = set.Id;
-        setName = set.Name;
-        setDescription = set.Description ?? string.Empty;
-        showSetEditor = true;
-        message = null;
-    }
-
-    private void CancelSetEdit()
-    {
-        editingSetId = null;
-        setName = string.Empty;
-        setDescription = string.Empty;
-        showSetEditor = false;
-    }
-
-    private async Task SaveSetAsync()
-    {
-        var name = setName.Trim();
-        if (string.IsNullOrWhiteSpace(name))
+        ruleCounts.Clear();
+        foreach (var item in await db.RuleSetRules
+            .Where(x => ids.Contains(x.RuleSetId))
+            .GroupBy(x => x.RuleSetId)
+            .Select(g => new { RuleSetId = g.Key, Count = g.Count() })
+            .ToListAsync())
         {
-            message = "Rule Set name is required.";
-            return;
+            ruleCounts[item.RuleSetId] = item.Count;
         }
 
-        await using var db = await DbFactory.CreateDbContextAsync();
-
-        if (editingSetId.HasValue)
+        clientCounts.Clear();
+        foreach (var item in await db.ClientRuleSetAssignments
+            .Where(x => ids.Contains(x.RuleSetId))
+            .GroupBy(x => x.RuleSetId)
+            .Select(g => new { RuleSetId = g.Key, Count = g.Count() })
+            .ToListAsync())
         {
-            var set = await db.RuleSets.SingleAsync(x => x.Id == editingSetId.Value);
-            set.Name = name;
-            set.Description = NullIfWhiteSpace(setDescription);
-            set.ModifiedUtc = DateTime.UtcNow;
+            clientCounts[item.RuleSetId] = item.Count;
         }
-        else
-        {
-            db.RuleSets.Add(new RuleSet
-            {
-                OrganizationId = organizationId,
-                Name = name,
-                Description = NullIfWhiteSpace(setDescription)
-            });
-        }
-
-        await db.SaveChangesAsync();
-        showSetEditor = false;
-        editingSetId = null;
-        setName = string.Empty;
-        setDescription = string.Empty;
-        message = "Rule Set saved.";
-        await LoadAsync();
     }
 
-    private async Task ToggleRuleInSetAsync(Guid ruleSetId, Guid masterRuleId, ChangeEventArgs e)
-    {
-        var selected = e.Value is bool value && value;
+    private int RuleCount(Guid ruleSetId) =>
+        ruleCounts.TryGetValue(ruleSetId, out var count) ? count : 0;
 
-        if (selected)
-        {
-            await RuleSetAssignments.AddRuleToSetAsync(ruleSetId, masterRuleId);
-            message = "Rule added to the set and inherited by clients already using this set.";
-        }
-        else
-        {
-            await RuleSetAssignments.RemoveRuleFromSetAsync(ruleSetId, masterRuleId);
-            message = "Rule removed from the set.";
-        }
+    private int ClientCount(Guid ruleSetId) =>
+        clientCounts.TryGetValue(ruleSetId, out var count) ? count : 0;
 
-        await LoadAsync();
-    }
+    private void ClearSearch() => searchText = string.Empty;
+
+    private void CreateRuleSet() => Navigation.NavigateTo("/rule-sets/new");
+
+    private void EditRuleSet(Guid id) => Navigation.NavigateTo($"/rule-sets/{id}/edit");
 
     private async Task ToggleSetActiveAsync(RuleSet set)
     {
@@ -253,9 +168,8 @@
         entity.IsActive = !entity.IsActive;
         entity.ModifiedUtc = DateTime.UtcNow;
         await db.SaveChangesAsync();
+
+        message = entity.IsActive ? "Rule Set activated." : "Rule Set deactivated.";
         await LoadAsync();
     }
-
-    private static string? NullIfWhiteSpace(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
