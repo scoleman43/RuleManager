@@ -56,7 +56,7 @@
                                 </td>
                                 <td class="text-end">
                                     <button class="btn btn-sm btn-outline-primary"
-                                            @onclick="() => Navigation.NavigateTo($"/clients/{row.ClientId}/rules")">
+                                            @onclick="() => OpenClientRules(row.ClientId)">
                                         Review
                                     </button>
                                 </td>
@@ -104,6 +104,9 @@
                 ConsistencyCalculator.Calculate(masterIds, clientAssignments)));
         }
     }
+
+    private void OpenClientRules(Guid clientId) =>
+        Navigation.NavigateTo($"/clients/{clientId}/rules");
 
     private sealed record ConsistencyRow(Guid ClientId, string ClientName, ConsistencySummary Summary);
 }
