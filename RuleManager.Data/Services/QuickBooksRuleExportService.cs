@@ -41,13 +41,36 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        if (rules.Count == 0)
-            return Failed("This client does not have any active rules assigned.");
+        var clientSpecificRules = await db.ClientRules
+            .Where(x => x.ClientId == clientId)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+
+        if (rules.Count == 0 && clientSpecificRules.Count == 0)
+            return Failed("This client does not have any active or client-specific rules to export.");
 
         var exportRows = new List<ExportRow>();
         var errors = new List<string>();
 
-        foreach (var rule in rules)
+        var clientSpecificNames = clientSpecificRules
+            .Select(x => x.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var rule in clientSpecificRules)
+        {
+            var row = BuildRow(rule, out var error);
+
+            if (row is null)
+            {
+                errors.Add($"{rule.Name}: {error}");
+                continue;
+            }
+
+            exportRows.Add(row);
+        }
+
+        foreach (var rule in rules.Where(x => !clientSpecificNames.Contains(x.Name)))
         {
             var row = BuildRow(rule, out var error);
 
@@ -96,11 +119,13 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             Array.Empty<string>());
     }
 
-    private static ExportRow? BuildRow(MasterRule rule, out string? error)
+    private static ExportRow? BuildRow(RuleBase rule, out string? error)
     {
         error = null;
 
-        if (rule.IsReadOnlyImport)
+        if (rule.IsReadOnlyImport
+            || rule.IsAccountSpecific
+            || rule.TransactionType == RuleTransactionType.CreditCardPayment)
         {
             if (!string.IsNullOrWhiteSpace(rule.OriginalConditionsJson)
                 && !string.IsNullOrWhiteSpace(rule.OriginalOutputsJson))
@@ -111,7 +136,7 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
                     rule.OriginalOutputsJson);
             }
 
-            error = "This imported read-only rule does not have its original QuickBooks JSON.";
+            error = "This imported account-specific/read-only rule does not have its original QuickBooks JSON.";
             return null;
         }
 
@@ -219,13 +244,12 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             JsonSerializer.Serialize(outputs));
     }
 
-    private static string? GetTransactionCode(MasterRule rule) => rule.TransactionType switch
+    private static string? GetTransactionCode(RuleBase rule) => rule.TransactionType switch
     {
         RuleTransactionType.Expense when rule.Direction == RuleDirection.MoneyOut => null,
         RuleTransactionType.Deposit when rule.Direction == RuleDirection.MoneyIn => null,
         RuleTransactionType.Check when rule.Direction == RuleDirection.MoneyOut => "3",
         RuleTransactionType.Transfer => "26",
-        RuleTransactionType.CreditCardPayment when rule.Direction == RuleDirection.MoneyOut => "64",
         _ => null
     };
 
