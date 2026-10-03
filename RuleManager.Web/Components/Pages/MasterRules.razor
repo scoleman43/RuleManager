@@ -1,4 +1,12 @@
 @page "/master-rules"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using RuleManager.Core.Domain
+@using RuleManager.Core.Rules
+@using RuleManager.Data
+@using RuleManager.Data.Services
+@inject IDbContextFactory<RuleManagerDbContext> DbFactory
+@inject WorkspaceService Workspace
 
 <PageTitle>Master Rules</PageTitle>
 
@@ -7,9 +15,441 @@
         <h1>Master Rules</h1>
         <p class="text-muted mb-0">Maintain the firm's canonical rules once and assign them across clients.</p>
     </div>
-    <button class="btn btn-primary" disabled>New Master Rule</button>
+    <button class="btn btn-primary" @onclick="BeginAdd">New Master Rule</button>
 </div>
 
-<div class="card"><div class="card-body">
-    <p class="mb-0 text-muted">Master rule editing, assignment status, and consistency comparison are coming next.</p>
-</div></div>
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success")">@message</div>
+}
+
+@if (showEditor)
+{
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">@(editId.HasValue ? "Edit Master Rule" : "New Master Rule")</h5>
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Rule name</label>
+                    <input class="form-control" @bind="ruleName" />
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label">Money direction</label>
+                    <select class="form-select" value="@direction" @onchange="DirectionChanged">
+                        <option value="@RuleDirection.MoneyOut">Money out</option>
+                        <option value="@RuleDirection.MoneyIn">Money in</option>
+                    </select>
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label">Transaction type</label>
+                    <select class="form-select" @bind="transactionType">
+                        @foreach (var type in AllowedTransactionTypes)
+                        {
+                            <option value="@type">@FormatTransactionType(type)</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Category</label>
+                    <select class="form-select" @bind="categoryId">
+                        <option value="">-- Select category --</option>
+                        @foreach (var category in categories.Where(x => x.IsActive))
+                        {
+                            <option value="@category.Id">@category.Name</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Payee</label>
+                    <input class="form-control" @bind="payee" />
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Condition logic</label>
+                    <select class="form-select" @bind="matchAllConditions">
+                        <option value="true">Match all conditions</option>
+                        <option value="false">Match any condition</option>
+                    </select>
+                </div>
+
+                <div class="col-md-6 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" @bind="autoAdd" id="autoAddRule" />
+                        <label class="form-check-label" for="autoAddRule">Auto-add matching transactions</label>
+                    </div>
+                </div>
+            </div>
+
+            <hr />
+
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Conditions</h6>
+                <button class="btn btn-sm btn-outline-primary" @onclick="AddCondition">Add Condition</button>
+            </div>
+
+            @for (var i = 0; i < conditions.Count; i++)
+            {
+                var index = i;
+                var condition = conditions[index];
+                <div class="row g-2 mb-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label">Field</label>
+                        <select class="form-select" value="@condition.Field" @onchange="e => ConditionFieldChanged(index, e)">
+                            <option value="@RuleMatchField.BankText">Bank text</option>
+                            <option value="@RuleMatchField.Description">Description</option>
+                            <option value="@RuleMatchField.Amount">Amount</option>
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Operator</label>
+                        <select class="form-select" @bind="condition.Operator">
+                            @foreach (var op in MasterRulePolicy.GetAllowedOperators(condition.Field))
+                            {
+                                <option value="@op">@FormatOperator(op)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-5">
+                        <label class="form-label">Value</label>
+                        <input class="form-control" @bind="condition.Value" />
+                    </div>
+                    <div class="col-md-1">
+                        <button class="btn btn-outline-danger w-100" @onclick="() => RemoveCondition(index)" disabled="@(conditions.Count == 1)">×</button>
+                    </div>
+                </div>
+            }
+
+            @if (conditions.Any(x => x.Field == RuleMatchField.Amount))
+            {
+                <div class="alert alert-warning mt-3 mb-0">
+                    Amount conditions can be stored in the master library, but QuickBooks export mapping for Amount is not yet confirmed.
+                </div>
+            }
+
+            <div class="alert alert-secondary mt-3">
+                New master rules are created for general use across bank accounts. Account-specific Credit Card Payment rules are intentionally not available here.
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" @onclick="SaveAsync">Save Rule</button>
+                <button class="btn btn-outline-secondary" @onclick="CancelEdit">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="card">
+    <div class="card-body p-0">
+        @if (rules.Count == 0)
+        {
+            <div class="p-4 text-muted">No master rules have been created yet.</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 align-middle">
+                    <thead>
+                        <tr>
+                            <th>Rule</th>
+                            <th>Direction</th>
+                            <th>Conditions</th>
+                            <th>Transaction Type</th>
+                            <th>Category</th>
+                            <th>Status</th>
+                            <th class="text-end">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var rule in rules)
+                        {
+                            <tr>
+                                <td>
+                                    <strong>@rule.Name</strong>
+                                    @if (!string.IsNullOrWhiteSpace(rule.Payee))
+                                    {
+                                        <div class="small text-muted">Payee: @rule.Payee</div>
+                                    }
+                                </td>
+                                <td>@(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")</td>
+                                <td>
+                                    <div>@(rule.MatchAllConditions ? "All" : "Any")</div>
+                                    <div class="small text-muted">@rule.Conditions.Count condition(s)</div>
+                                </td>
+                                <td>@FormatTransactionType(rule.TransactionType)</td>
+                                <td>@(rule.CategoryName ?? "—")</td>
+                                <td>
+                                    <span class="badge @(rule.IsActive ? "text-bg-success" : "text-bg-secondary")">
+                                        @(rule.IsActive ? "Active" : "Inactive")
+                                    </span>
+                                </td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => BeginEdit(rule)">Edit</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(rule)">
+                                        @(rule.IsActive ? "Deactivate" : "Activate")
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private readonly List<MasterRule> rules = new();
+    private readonly List<Category> categories = new();
+    private readonly List<RuleCondition> conditions = new();
+
+    private Guid organizationId;
+    private Guid? editId;
+    private string ruleName = string.Empty;
+    private RuleDirection direction = RuleDirection.MoneyOut;
+    private RuleTransactionType transactionType = RuleTransactionType.Expense;
+    private string categoryId = string.Empty;
+    private string payee = string.Empty;
+    private bool matchAllConditions = true;
+    private bool autoAdd;
+    private bool showEditor;
+    private bool isError;
+    private string? message;
+
+    private IReadOnlyList<RuleTransactionType> AllowedTransactionTypes =>
+        MasterRulePolicy.GetAllowedTransactionTypes(direction);
+
+    protected override async Task OnInitializedAsync()
+    {
+        organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        categories.Clear();
+        categories.AddRange(await db.Categories
+            .Where(x => x.OrganizationId == organizationId)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+
+        rules.Clear();
+        rules.AddRange(await db.MasterRules
+            .Where(x => x.OrganizationId == organizationId)
+            .OrderByDescending(x => x.IsActive)
+            .ThenBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+    }
+
+    private void BeginAdd()
+    {
+        editId = null;
+        ruleName = string.Empty;
+        direction = RuleDirection.MoneyOut;
+        transactionType = RuleTransactionType.Expense;
+        categoryId = string.Empty;
+        payee = string.Empty;
+        matchAllConditions = true;
+        autoAdd = false;
+        conditions.Clear();
+        conditions.Add(NewCondition());
+        showEditor = true;
+        message = null;
+        isError = false;
+    }
+
+    private void BeginEdit(MasterRule rule)
+    {
+        editId = rule.Id;
+        ruleName = rule.Name;
+        direction = rule.Direction;
+        transactionType = rule.TransactionType;
+        categoryId = rule.CategoryId?.ToString() ?? string.Empty;
+        payee = rule.Payee ?? string.Empty;
+        matchAllConditions = rule.MatchAllConditions;
+        autoAdd = rule.AutoAdd;
+        conditions.Clear();
+        conditions.AddRange(rule.Conditions.Select(x => new RuleCondition
+        {
+            Field = x.Field,
+            Operator = x.Operator,
+            Value = x.Value
+        }));
+
+        if (conditions.Count == 0)
+            conditions.Add(NewCondition());
+
+        showEditor = true;
+        message = null;
+        isError = false;
+    }
+
+    private void CancelEdit()
+    {
+        showEditor = false;
+        editId = null;
+        conditions.Clear();
+    }
+
+    private void AddCondition() => conditions.Add(NewCondition());
+
+    private void RemoveCondition(int index)
+    {
+        if (conditions.Count > 1 && index >= 0 && index < conditions.Count)
+            conditions.RemoveAt(index);
+    }
+
+    private void DirectionChanged(ChangeEventArgs e)
+    {
+        if (Enum.TryParse<RuleDirection>(e.Value?.ToString(), out var parsed))
+        {
+            direction = parsed;
+            if (!AllowedTransactionTypes.Contains(transactionType))
+                transactionType = AllowedTransactionTypes[0];
+        }
+    }
+
+    private void ConditionFieldChanged(int index, ChangeEventArgs e)
+    {
+        if (index < 0 || index >= conditions.Count)
+            return;
+
+        if (Enum.TryParse<RuleMatchField>(e.Value?.ToString(), out var parsed))
+        {
+            conditions[index].Field = parsed;
+            conditions[index].Operator = MasterRulePolicy.GetAllowedOperators(parsed)[0];
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        var name = ruleName.Trim();
+
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            SetError("Rule name is required.");
+            return;
+        }
+
+        if (conditions.Count == 0 || conditions.Any(x => string.IsNullOrWhiteSpace(x.Value)))
+        {
+            SetError("Every rule needs at least one condition with a value.");
+            return;
+        }
+
+        if (!MasterRulePolicy.CanCreate(direction, transactionType))
+        {
+            SetError("That transaction type is not valid for the selected money direction.");
+            return;
+        }
+
+        Guid? selectedCategoryId = null;
+        string? selectedCategoryName = null;
+
+        if (!string.IsNullOrWhiteSpace(categoryId))
+        {
+            if (!Guid.TryParse(categoryId, out var parsedCategoryId))
+            {
+                SetError("The selected category is invalid.");
+                return;
+            }
+
+            selectedCategoryId = parsedCategoryId;
+            selectedCategoryName = categories.FirstOrDefault(x => x.Id == parsedCategoryId)?.Name;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        MasterRule entity;
+        if (editId.HasValue)
+        {
+            entity = await db.MasterRules.SingleAsync(x => x.Id == editId.Value);
+        }
+        else
+        {
+            entity = new MasterRule
+            {
+                OrganizationId = organizationId
+            };
+            db.MasterRules.Add(entity);
+        }
+
+        entity.Name = name;
+        entity.Direction = direction;
+        entity.TransactionType = transactionType;
+        entity.CategoryId = selectedCategoryId;
+        entity.CategoryName = selectedCategoryName;
+        entity.Payee = NullIfWhiteSpace(payee);
+        entity.MatchAllConditions = matchAllConditions;
+        entity.AutoAdd = autoAdd;
+        entity.IsAccountSpecific = false;
+        entity.IsReadOnlyImport = false;
+        entity.Conditions = conditions.Select(x => new RuleCondition
+        {
+            Field = x.Field,
+            Operator = x.Operator,
+            Value = x.Value.Trim()
+        }).ToList();
+        entity.ModifiedUtc = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+
+        showEditor = false;
+        editId = null;
+        conditions.Clear();
+        isError = false;
+        message = "Master rule saved.";
+        await LoadAsync();
+    }
+
+    private async Task ToggleActiveAsync(MasterRule rule)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var entity = await db.MasterRules.SingleAsync(x => x.Id == rule.Id);
+        entity.IsActive = !entity.IsActive;
+        entity.ModifiedUtc = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private void SetError(string text)
+    {
+        isError = true;
+        message = text;
+    }
+
+    private static RuleCondition NewCondition() => new()
+    {
+        Field = RuleMatchField.BankText,
+        Operator = RuleMatchOperator.Contains,
+        Value = string.Empty
+    };
+
+    private static string? NullIfWhiteSpace(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string FormatTransactionType(RuleTransactionType type) => type switch
+    {
+        RuleTransactionType.CreditCardPayment => "Credit card payment",
+        _ => string.Concat(type.ToString().Select((c, i) => i > 0 && char.IsUpper(c) ? " " + c : c.ToString()))
+    };
+
+    private static string FormatOperator(RuleMatchOperator op) => op switch
+    {
+        RuleMatchOperator.DoesNotContain => "Doesn't contain",
+        RuleMatchOperator.DoesNotEqual => "Doesn't equal",
+        RuleMatchOperator.StartsWith => "Starts with",
+        RuleMatchOperator.EndsWith => "Ends with",
+        RuleMatchOperator.GreaterThan => "Is greater than",
+        RuleMatchOperator.LessThan => "Is less than",
+        _ => op.ToString()
+    };
+}
