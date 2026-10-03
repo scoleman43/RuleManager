@@ -24,6 +24,8 @@ public sealed class RuleSetAssignmentService(IDbContextFactory<RuleManagerDbCont
 
         var masterRuleIds = await db.RuleSetRules
             .Where(x => x.RuleSetId == ruleSetId)
+            .OrderBy(x => x.SortOrder)
+            .ThenBy(x => x.CreatedUtc)
             .Select(x => x.MasterRuleId)
             .ToListAsync(cancellationToken);
 
