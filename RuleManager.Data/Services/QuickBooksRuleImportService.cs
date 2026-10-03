@@ -16,6 +16,12 @@ public enum RuleImportStatus
     Unsupported
 }
 
+public enum ChangedRuleImportAction
+{
+    UpdateExisting,
+    CreateNew
+}
+
 public sealed class RuleImportPreviewItem
 {
     public int RowNumber { get; init; }
@@ -33,8 +39,17 @@ public sealed class RuleImportPreviewItem
     public string? UnsupportedReason { get; init; }
     public RuleImportStatus Status { get; set; }
     public Guid? ExistingRuleId { get; set; }
+    public ChangedRuleImportAction ChangedAction { get; set; } = ChangedRuleImportAction.UpdateExisting;
+    public string NewRuleName { get; set; } = string.Empty;
     public bool Selected { get; set; }
     public string? ClientComparison { get; set; }
+
+    public string EffectiveName =>
+        Status == RuleImportStatus.Changed
+        && ChangedAction == ChangedRuleImportAction.CreateNew
+        && !string.IsNullOrWhiteSpace(NewRuleName)
+            ? NewRuleName.Trim()
+            : Name;
 }
 
 public sealed record RuleImportApplyResult(
@@ -110,6 +125,8 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             else
             {
                 item.Status = RuleImportStatus.Changed;
+                item.ChangedAction = ChangedRuleImportAction.UpdateExisting;
+                item.NewRuleName = string.Empty;
                 item.Selected = true;
             }
         }
@@ -138,6 +155,26 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             return new RuleImportApplyResult(0, 0, 0, 0);
 
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
+
+        var createAsNewItems = selectedLibraryRules
+            .Where(x => x.Status == RuleImportStatus.Changed
+                && x.ChangedAction == ChangedRuleImportAction.CreateNew)
+            .ToList();
+
+        foreach (var item in createAsNewItems)
+        {
+            if (string.IsNullOrWhiteSpace(item.NewRuleName))
+                throw new InvalidOperationException($"Enter a new rule name for changed rule '{item.Name}'.");
+
+            var newName = item.NewRuleName.Trim();
+            var nameExists = await db.MasterRules.AnyAsync(
+                x => x.OrganizationId == organizationId && x.Name.ToLower() == newName.ToLower(),
+                cancellationToken);
+
+            if (nameExists)
+                throw new InvalidOperationException($"A reusable rule named '{newName}' already exists. Choose a different name.");
+        }
+
         var added = 0;
         var updated = 0;
         var clientSpecificAdded = 0;
@@ -172,7 +209,10 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
         {
             MasterRule entity;
 
-            if (item.ExistingRuleId.HasValue)
+            var createAsNew = item.Status == RuleImportStatus.Changed
+                && item.ChangedAction == ChangedRuleImportAction.CreateNew;
+
+            if (item.ExistingRuleId.HasValue && !createAsNew)
             {
                 entity = await db.MasterRules.SingleAsync(
                     x => x.Id == item.ExistingRuleId.Value && x.OrganizationId == organizationId,
@@ -189,7 +229,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                 added++;
             }
 
-            entity.Name = item.Name;
+            entity.Name = createAsNew ? item.NewRuleName.Trim() : item.Name;
             entity.Direction = item.Direction;
             entity.TransactionType = item.TransactionType;
             entity.CategoryName = item.CategoryName;
