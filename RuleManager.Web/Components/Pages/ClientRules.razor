@@ -57,6 +57,72 @@ else
     </div>
 
     <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h5 class="card-title mb-1">QuickBooks Export Order</h5>
+                    <div class="text-muted small">
+                        QuickBooks evaluates rules from top to bottom. This priority controls the row order in the exported workbook.
+                    </div>
+                </div>
+            </div>
+
+            @if (!ExportOrderRows.Any())
+            {
+                <div class="text-muted">No rules are currently available for export.</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th style="width: 105px;">Priority</th>
+                                <th>Rule</th>
+                                <th>Source</th>
+                                <th class="text-end" style="width: 120px;">Move</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in ExportOrderRows)
+                            {
+                                <tr>
+                                    <td>
+                                        <input class="form-control form-control-sm export-priority-input"
+                                               type="number"
+                                               min="1"
+                                               max="@ExportOrderRows.Count()"
+                                               value="@row.Priority"
+                                               @onchange="e => SetExportPriorityAsync(row, e)" />
+                                    </td>
+                                    <td><strong>@row.Name</strong></td>
+                                    <td>
+                                        <span class="badge @(row.IsClientSpecific ? "status-badge-client-specific" : "rule-source-set")">
+                                            @row.Source
+                                        </span>
+                                    </td>
+                                    <td class="text-end">
+                                        <div class="btn-group btn-group-sm" role="group" aria-label="Change export priority">
+                                            <button class="btn btn-outline-secondary"
+                                                    title="Move up"
+                                                    disabled="@(row.Priority <= 1)"
+                                                    @onclick="() => MoveExportRuleAsync(row, -1)">↑</button>
+                                            <button class="btn btn-outline-secondary"
+                                                    title="Move down"
+                                                    disabled="@(row.Priority >= ExportOrderRows.Count())"
+                                                    @onclick="() => MoveExportRuleAsync(row, 1)">↓</button>
+                                        </div>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-4">
         <button type="button"
                 class="btn text-start w-100 p-0 border-0"
                 @onclick="ToggleRuleSetsSection">
@@ -391,7 +457,9 @@ else
             MatchesRuleSearch(rule)
             && MatchesSource(rule)
             && MatchesDirection(rule)
-            && MatchesCategory(rule));
+            && MatchesCategory(rule))
+        .OrderBy(rule => AssignmentFor(rule.Id)?.ExportPriority ?? int.MaxValue)
+        .ThenBy(rule => rule.Name);
 
     private IEnumerable<MasterRule> DirectRuleOptions =>
         masterRules.Where(rule =>
@@ -400,6 +468,54 @@ else
                 || rule.Name.Contains(directRuleSearchText.Trim(), StringComparison.OrdinalIgnoreCase)
                 || (rule.CategoryName?.Contains(directRuleSearchText.Trim(), StringComparison.OrdinalIgnoreCase) ?? false)
                 || (rule.Payee?.Contains(directRuleSearchText.Trim(), StringComparison.OrdinalIgnoreCase) ?? false)));
+
+    private IReadOnlyList<ExportOrderRow> ExportOrderRows
+    {
+        get
+        {
+            var clientSpecificNames = clientSpecificRules
+                .Select(x => x.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var reusableRows = assignments
+                .Join(masterRules,
+                    assignment => assignment.MasterRuleId,
+                    rule => rule.Id,
+                    (assignment, rule) => new { assignment, rule })
+                .Where(x => !clientSpecificNames.Contains(x.rule.Name))
+                .Select(x =>
+                {
+                    var fromSet = expectedFromRuleSets.Contains(x.rule.Id);
+                    var direct = x.assignment.IsExplicit;
+                    var source = fromSet && direct
+                        ? "Rule Set + Direct"
+                        : fromSet
+                            ? "Rule Set"
+                            : "Direct";
+
+                    return new ExportOrderRow(
+                        x.assignment.Id,
+                        false,
+                        x.assignment.ExportPriority,
+                        x.rule.Name,
+                        source);
+                });
+
+            var clientRows = clientSpecificRules.Select(rule =>
+                new ExportOrderRow(
+                    rule.Id,
+                    true,
+                    rule.ExportPriority,
+                    rule.Name,
+                    "Client-specific"));
+
+            return reusableRows
+                .Concat(clientRows)
+                .OrderBy(x => x.Priority)
+                .ThenBy(x => x.Name)
+                .ToList();
+        }
+    }
 
     private int SetRuleCount => AssignedRules.Count(x => expectedFromRuleSets.Contains(x.Id));
     private int DirectRuleCount => AssignedRules.Count(x => AssignmentFor(x.Id)?.IsExplicit == true);
@@ -463,7 +579,8 @@ else
         clientSpecificRules.Clear();
         clientSpecificRules.AddRange(await db.ClientRules
             .Where(x => x.ClientId == ClientId && x.IsAccountSpecific)
-            .OrderBy(x => x.Name)
+            .OrderBy(x => x.ExportPriority)
+            .ThenBy(x => x.Name)
             .AsNoTracking()
             .ToListAsync());
 
@@ -621,6 +738,87 @@ else
         await LoadAsync();
     }
 
+    private async Task SetExportPriorityAsync(ExportOrderRow row, ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var requestedPriority))
+            return;
+
+        var ordered = ExportOrderRows.ToList();
+        var currentIndex = ordered.FindIndex(x =>
+            x.EntityId == row.EntityId && x.IsClientSpecific == row.IsClientSpecific);
+
+        if (currentIndex < 0)
+            return;
+
+        requestedPriority = Math.Clamp(requestedPriority, 1, ordered.Count);
+        var selected = ordered[currentIndex];
+        ordered.RemoveAt(currentIndex);
+        ordered.Insert(requestedPriority - 1, selected);
+
+        await PersistExportOrderAsync(ordered);
+    }
+
+    private async Task MoveExportRuleAsync(ExportOrderRow row, int direction)
+    {
+        var ordered = ExportOrderRows.ToList();
+        var currentIndex = ordered.FindIndex(x =>
+            x.EntityId == row.EntityId && x.IsClientSpecific == row.IsClientSpecific);
+        var targetIndex = currentIndex + direction;
+
+        if (currentIndex < 0 || targetIndex < 0 || targetIndex >= ordered.Count)
+            return;
+
+        (ordered[currentIndex], ordered[targetIndex]) = (ordered[targetIndex], ordered[currentIndex]);
+        await PersistExportOrderAsync(ordered);
+    }
+
+    private async Task PersistExportOrderAsync(IReadOnlyList<ExportOrderRow> ordered)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var assignmentIds = ordered
+            .Where(x => !x.IsClientSpecific)
+            .Select(x => x.EntityId)
+            .ToArray();
+
+        var clientRuleIds = ordered
+            .Where(x => x.IsClientSpecific)
+            .Select(x => x.EntityId)
+            .ToArray();
+
+        var assignmentEntities = await db.ClientRuleAssignments
+            .Where(x => assignmentIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+
+        var clientRuleEntities = await db.ClientRules
+            .Where(x => clientRuleIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var priority = i + 1;
+            var row = ordered[i];
+
+            if (row.IsClientSpecific)
+            {
+                if (clientRuleEntities.TryGetValue(row.EntityId, out var clientRule))
+                {
+                    clientRule.ExportPriority = priority;
+                    clientRule.ModifiedUtc = DateTime.UtcNow;
+                }
+            }
+            else if (assignmentEntities.TryGetValue(row.EntityId, out var assignment))
+            {
+                assignment.ExportPriority = priority;
+                assignment.ModifiedUtc = DateTime.UtcNow;
+            }
+        }
+
+        await db.SaveChangesAsync();
+        message = "QuickBooks export priority updated.";
+        await LoadAsync();
+    }
+
     private bool MatchesRuleSearch(MasterRule rule)
     {
         if (string.IsNullOrWhiteSpace(ruleSearchText))
@@ -680,6 +878,13 @@ else
 
         return names.Length == 0 ? "Rule Set" : string.Join(", ", names);
     }
+
+    private sealed record ExportOrderRow(
+        Guid EntityId,
+        bool IsClientSpecific,
+        int Priority,
+        string Name,
+        string Source);
 
     private static string FormatTransactionType(RuleTransactionType type) => type switch
     {
