@@ -513,3 +513,41 @@ a:hover, .btn-link:hover {
     text-align: center;
     font-weight: 700;
 }
+
+
+.autocomplete-shell {
+    position: relative;
+}
+
+.autocomplete-menu {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: calc(100% + 0.3rem);
+    z-index: 40;
+    max-height: 280px;
+    overflow-y: auto;
+    background: #fff;
+    border: 1px solid var(--rm-border);
+    border-radius: 0.65rem;
+    box-shadow: 0 14px 34px rgba(16, 43, 23, 0.16);
+    padding: 0.35rem;
+}
+
+.autocomplete-item {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    padding: 0.65rem 0.75rem;
+    border-radius: 0.45rem;
+    color: var(--rm-text);
+}
+
+.autocomplete-item:hover,
+.autocomplete-item:focus {
+    background: #f3f8f2;
+    color: var(--rm-green-dark);
+    outline: none;
+}
