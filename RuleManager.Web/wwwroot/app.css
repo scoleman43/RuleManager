@@ -582,3 +582,10 @@ a:hover, .btn-link:hover {
     color: var(--rm-green-dark);
     outline: none;
 }
+
+
+@media (min-width: 992px) {
+    .rules-table-responsive {
+        overflow: visible;
+    }
+}
