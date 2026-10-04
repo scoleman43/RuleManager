@@ -189,14 +189,14 @@ else
                 <div class="card mb-3">
                     <div class="card-body">
                         <div class="row g-3">
-                            <div class="col-lg-4">
+                            <div class="col-lg-3">
                                 <label class="form-label">Search</label>
                                 <input class="form-control"
                                        @bind="ruleSearchText"
                                        @bind:event="oninput"
                                        placeholder="Rule name, category, payee, or condition..." />
                             </div>
-                            <div class="col-md-4 col-lg-3">
+                            <div class="col-md-4 col-lg-2">
                                 <label class="form-label">Source</label>
                                 <select class="form-select" @bind="sourceFilter">
                                     <option value="all">All Assigned Rules</option>
@@ -211,6 +211,14 @@ else
                                     <option value="all">All</option>
                                     <option value="out">Money out</option>
                                     <option value="in">Money in</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 col-lg-2">
+                                <label class="form-label">Auto Add</label>
+                                <select class="form-select" @bind="autoAddFilter">
+                                    <option value="all">All</option>
+                                    <option value="yes">Yes</option>
+                                    <option value="no">No</option>
                                 </select>
                             </div>
                             <div class="col-md-4 col-lg-3">
@@ -441,6 +449,7 @@ else
     private string ruleSearchText = string.Empty;
     private string sourceFilter = "all";
     private string directionFilter = "all";
+    private string autoAddFilter = "all";
     private string categoryFilter = "all";
 
     private IEnumerable<RuleSet> AssignedRuleSets =>
@@ -957,6 +966,13 @@ else
         _ => true
     };
 
+    private bool MatchesAutoAdd(MasterRule rule) => autoAddFilter switch
+    {
+        "yes" => rule.AutoAdd,
+        "no" => !rule.AutoAdd,
+        _ => true
+    };
+
     private bool MatchesCategory(MasterRule rule) => categoryFilter switch
     {
         "all" => true,
@@ -969,6 +985,7 @@ else
         ruleSearchText = string.Empty;
         sourceFilter = "all";
         directionFilter = "all";
+        autoAddFilter = "all";
         categoryFilter = "all";
     }
 
