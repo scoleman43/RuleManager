@@ -107,15 +107,24 @@ else
                     <div class="col-lg-10">
                         <label class="form-label">Rule Set</label>
                         <div class="autocomplete-shell">
-                            <input class="form-control"
-                                   value="@ruleSetSearchText"
-                                   @oninput="HandleRuleSetSearchInput"
-                                   placeholder="Start typing a Rule Set name..." />
+                            <div class="autocomplete-input-group">
+                                <input class="form-control"
+                                       value="@ruleSetSearchText"
+                                       @oninput="HandleRuleSetSearchInput"
+                                       @onfocus="OpenRuleSetSuggestions"
+                                       placeholder="Select or type to filter Rule Sets..." />
+                                <button type="button"
+                                        class="autocomplete-toggle"
+                                        title="Show Rule Sets"
+                                        @onclick="ToggleRuleSetSuggestions">
+                                    ▾
+                                </button>
+                            </div>
 
                             @if (showRuleSetSuggestions && AvailableRuleSetOptions.Any())
                             {
                                 <div class="autocomplete-menu">
-                                    @foreach (var set in AvailableRuleSetOptions.Take(8))
+                                    @foreach (var set in AvailableRuleSetOptions)
                                     {
                                         <button type="button"
                                                 class="autocomplete-item"
@@ -732,7 +741,17 @@ else
     {
         ruleSetSearchText = e.Value?.ToString() ?? string.Empty;
         selectedRuleSetId = string.Empty;
-        showRuleSetSuggestions = !string.IsNullOrWhiteSpace(ruleSetSearchText);
+        showRuleSetSuggestions = true;
+    }
+
+    private void OpenRuleSetSuggestions(FocusEventArgs _)
+    {
+        showRuleSetSuggestions = true;
+    }
+
+    private void ToggleRuleSetSuggestions()
+    {
+        showRuleSetSuggestions = !showRuleSetSuggestions;
     }
 
     private void SelectRuleSet(RuleSet set)
