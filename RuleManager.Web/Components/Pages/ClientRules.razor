@@ -57,73 +57,6 @@ else
     </div>
 
     <div class="card mb-4">
-        <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start mb-3">
-                <div>
-                    <h5 class="card-title mb-1">QuickBooks Export Order</h5>
-                    <div class="text-muted small">
-                        QuickBooks evaluates rules from top to bottom. This priority controls the row order in the exported workbook.
-                    </div>
-                </div>
-            </div>
-
-            @if (!ExportOrderRows.Any())
-            {
-                <div class="text-muted">No rules are currently available for export.</div>
-            }
-            else
-            {
-                <div class="table-responsive">
-                    <table class="table table-sm align-middle mb-0">
-                        <thead>
-                            <tr>
-                                <th style="width: 105px;">Priority</th>
-                                <th>Rule</th>
-                                <th>Source</th>
-                                <th class="text-end" style="width: 120px;">Move</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var row in ExportOrderRows)
-                            {
-                                <tr @key="row.EntityId">
-                                    <td>
-                                        <input @key="@($"{row.EntityId}:{row.Priority}")"
-                                               class="form-control form-control-sm export-priority-input"
-                                               type="number"
-                                               min="1"
-                                               max="@ExportOrderRows.Count()"
-                                               value="@row.Priority"
-                                               @onchange="e => SetExportPriorityAsync(row, e)" />
-                                    </td>
-                                    <td><strong>@row.Name</strong></td>
-                                    <td>
-                                        <span class="badge @(row.IsClientSpecific ? "status-badge-client-specific" : "rule-source-set")">
-                                            @row.Source
-                                        </span>
-                                    </td>
-                                    <td class="text-end">
-                                        <div class="btn-group btn-group-sm" role="group" aria-label="Change export priority">
-                                            <button class="btn btn-outline-secondary"
-                                                    title="Move up"
-                                                    disabled="@(row.Priority <= 1)"
-                                                    @onclick="() => MoveExportRuleAsync(row, -1)">↑</button>
-                                            <button class="btn btn-outline-secondary"
-                                                    title="Move down"
-                                                    disabled="@(row.Priority >= ExportOrderRows.Count())"
-                                                    @onclick="() => MoveExportRuleAsync(row, 1)">↓</button>
-                                        </div>
-                                    </td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
-                </div>
-            }
-        </div>
-    </div>
-
-    <div class="card mb-4">
         <button type="button"
                 class="btn text-start w-100 p-0 border-0"
                 @onclick="ToggleRuleSetsSection">
@@ -241,7 +174,7 @@ else
             <div class="card-body d-flex justify-content-between align-items-center">
                 <div>
                     <h5 class="card-title mb-1">Assigned Rules (@AssignedRules.Count())</h5>
-                    <div class="text-muted small">Only rules currently assigned through a Rule Set or directly are shown.</div>
+                    <div class="text-muted small">Rules are shown in QuickBooks export priority order. QuickBooks evaluates rules from top to bottom.</div>
                 </div>
                 <span class="fs-4" aria-hidden="true">@(showAssignedRulesSection ? "▲" : "▼")</span>
             </div>
@@ -313,11 +246,14 @@ else
                         <table class="table table-hover mb-0 align-middle">
                             <thead>
                                 <tr>
+                                    <th style="width: 100px;">Priority</th>
                                     <th>Rule</th>
                                     <th>Source</th>
                                     <th>Direction</th>
                                     <th>Transaction</th>
                                     <th>Category</th>
+                                    <th>Auto Add</th>
+                                    <th class="text-end" style="width: 120px;">Move</th>
                                     <th class="text-end">Action</th>
                                 </tr>
                             </thead>
@@ -327,8 +263,21 @@ else
                                     var assignment = AssignmentFor(rule.Id);
                                     var fromSet = expectedFromRuleSets.Contains(rule.Id);
                                     var direct = assignment?.IsExplicit == true;
+                                    var exportRow = ExportRowForMasterRule(rule.Id);
 
-                                    <tr>
+                                    <tr @key="rule.Id">
+                                        <td>
+                                            @if (exportRow is not null)
+                                            {
+                                                <input @key="@($"{exportRow.EntityId}:{exportRow.Priority}")"
+                                                       class="form-control form-control-sm export-priority-input"
+                                                       type="number"
+                                                       min="1"
+                                                       max="@ExportOrderRows.Count"
+                                                       value="@exportRow.Priority"
+                                                       @onchange="e => SetExportPriorityAsync(exportRow, e)" />
+                                            }
+                                        </td>
                                         <td>
                                             <strong>@rule.Name</strong>
                                             @if (!string.IsNullOrWhiteSpace(rule.Payee))
@@ -349,6 +298,26 @@ else
                                         <td>@(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")</td>
                                         <td>@FormatTransactionType(rule.TransactionType)</td>
                                         <td>@(rule.CategoryName ?? "—")</td>
+                                        <td>
+                                            <span class="badge @(rule.AutoAdd ? "status-badge-active" : "status-badge-inactive")">
+                                                @(rule.AutoAdd ? "Yes" : "No")
+                                            </span>
+                                        </td>
+                                        <td class="text-end">
+                                            @if (exportRow is not null)
+                                            {
+                                                <div class="btn-group btn-group-sm" role="group" aria-label="Change export priority">
+                                                    <button class="btn btn-outline-secondary"
+                                                            title="Move up"
+                                                            disabled="@(exportRow.Priority <= 1)"
+                                                            @onclick="() => MoveExportRuleAsync(exportRow, -1)">↑</button>
+                                                    <button class="btn btn-outline-secondary"
+                                                            title="Move down"
+                                                            disabled="@(exportRow.Priority >= ExportOrderRows.Count)"
+                                                            @onclick="() => MoveExportRuleAsync(exportRow, 1)">↓</button>
+                                                </div>
+                                            }
+                                        </td>
                                         <td class="text-end">
                                             @if (direct)
                                             {
@@ -384,22 +353,59 @@ else
                     <table class="table table-hover mb-0 align-middle">
                         <thead>
                             <tr>
+                                <th style="width: 100px;">Priority</th>
                                 <th>Rule</th>
                                 <th>Direction</th>
                                 <th>Transaction</th>
                                 <th>Account / Category</th>
+                                <th>Auto Add</th>
                                 <th>Status</th>
+                                <th class="text-end" style="width: 120px;">Move</th>
                             </tr>
                         </thead>
                         <tbody>
                             @foreach (var rule in clientSpecificRules)
                             {
-                                <tr>
+                                var exportRow = ExportRowForClientSpecificRule(rule.Id);
+
+                                <tr @key="rule.Id">
+                                    <td>
+                                        @if (exportRow is not null)
+                                        {
+                                            <input @key="@($"{exportRow.EntityId}:{exportRow.Priority}")"
+                                                   class="form-control form-control-sm export-priority-input"
+                                                   type="number"
+                                                   min="1"
+                                                   max="@ExportOrderRows.Count"
+                                                   value="@exportRow.Priority"
+                                                   @onchange="e => SetExportPriorityAsync(exportRow, e)" />
+                                        }
+                                    </td>
                                     <td><strong>@rule.Name</strong></td>
                                     <td>@(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")</td>
                                     <td>@FormatTransactionType(rule.TransactionType)</td>
                                     <td>@(rule.CategoryName ?? "—")</td>
+                                    <td>
+                                        <span class="badge @(rule.AutoAdd ? "status-badge-active" : "status-badge-inactive")">
+                                            @(rule.AutoAdd ? "Yes" : "No")
+                                        </span>
+                                    </td>
                                     <td><span class="badge status-badge-client-specific">Client-specific</span></td>
+                                    <td class="text-end">
+                                        @if (exportRow is not null)
+                                        {
+                                            <div class="btn-group btn-group-sm" role="group" aria-label="Change export priority">
+                                                <button class="btn btn-outline-secondary"
+                                                        title="Move up"
+                                                        disabled="@(exportRow.Priority <= 1)"
+                                                        @onclick="() => MoveExportRuleAsync(exportRow, -1)">↑</button>
+                                                <button class="btn btn-outline-secondary"
+                                                        title="Move down"
+                                                        disabled="@(exportRow.Priority >= ExportOrderRows.Count)"
+                                                        @onclick="() => MoveExportRuleAsync(exportRow, 1)">↓</button>
+                                            </div>
+                                        }
+                                    </td>
                                 </tr>
                             }
                         </tbody>
@@ -840,6 +846,20 @@ else
         await db.SaveChangesAsync();
         await LoadAsync();
     }
+
+    private ExportOrderRow? ExportRowForMasterRule(Guid masterRuleId)
+    {
+        var assignment = AssignmentFor(masterRuleId);
+        if (assignment is null)
+            return null;
+
+        return ExportOrderRows.FirstOrDefault(x =>
+            !x.IsClientSpecific && x.EntityId == assignment.Id);
+    }
+
+    private ExportOrderRow? ExportRowForClientSpecificRule(Guid clientRuleId) =>
+        ExportOrderRows.FirstOrDefault(x =>
+            x.IsClientSpecific && x.EntityId == clientRuleId);
 
     private async Task SetExportPriorityAsync(ExportOrderRow row, ChangeEventArgs e)
     {
