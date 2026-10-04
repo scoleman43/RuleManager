@@ -106,45 +106,13 @@ else
                 <div class="row g-3 align-items-end">
                     <div class="col-lg-10">
                         <label class="form-label">Rule Set</label>
-                        <div class="autocomplete-shell">
-                            <div class="autocomplete-input-group">
-                                <input class="form-control"
-                                       value="@ruleSetSearchText"
-                                       @oninput="HandleRuleSetSearchInput"
-                                       @onfocus="OpenRuleSetSuggestions"
-                                       placeholder="Select or type to filter Rule Sets..." />
-                                <button type="button"
-                                        class="autocomplete-toggle"
-                                        title="Show Rule Sets"
-                                        @onclick="ToggleRuleSetSuggestions">
-                                    ▾
-                                </button>
-                            </div>
-
-                            @if (showRuleSetSuggestions && AvailableRuleSetOptions.Any())
+                        <select class="form-select" @bind="selectedRuleSetId">
+                            <option value="">-- Select Rule Set --</option>
+                            @foreach (var set in AvailableRuleSetOptions)
                             {
-                                <div class="autocomplete-menu">
-                                    @foreach (var set in AvailableRuleSetOptions)
-                                    {
-                                        <button type="button"
-                                                class="autocomplete-item"
-                                                @onclick="() => SelectRuleSet(set)">
-                                            <strong>@set.Name</strong>
-                                            @if (!string.IsNullOrWhiteSpace(set.Description))
-                                            {
-                                                <span class="small text-muted d-block">@set.Description</span>
-                                            }
-                                        </button>
-                                    }
-                                </div>
+                                <option value="@set.Id">@set.Name</option>
                             }
-                        </div>
-
-                        @if (!string.IsNullOrWhiteSpace(ruleSetSearchText)
-                            && !AvailableRuleSetOptions.Any())
-                        {
-                            <div class="form-text">No available Rule Sets match that name.</div>
-                        }
+                        </select>
                     </div>
                     <div class="col-lg-2">
                         <button class="btn btn-primary w-100" @onclick="AddRuleSetAsync">Add Rule Set</button>
@@ -458,9 +426,7 @@ else
     private bool showRuleSetsSection;
     private bool showAssignedRulesSection;
 
-    private string ruleSetSearchText = string.Empty;
     private string selectedRuleSetId = string.Empty;
-    private bool showRuleSetSuggestions;
 
     private bool showDirectRulePicker;
     private string directRuleSearchText = string.Empty;
@@ -475,10 +441,7 @@ else
         ruleSets.Where(x => assignedRuleSetIds.Contains(x.Id));
 
     private IEnumerable<RuleSet> AvailableRuleSetOptions =>
-        ruleSets.Where(set =>
-            !assignedRuleSetIds.Contains(set.Id)
-            && (string.IsNullOrWhiteSpace(ruleSetSearchText)
-                || set.Name.Contains(ruleSetSearchText.Trim(), StringComparison.OrdinalIgnoreCase)));
+        ruleSets.Where(set => !assignedRuleSetIds.Contains(set.Id));
 
     private IEnumerable<MasterRule> AssignedRules =>
         masterRules.Where(rule =>
@@ -737,68 +700,20 @@ else
     private ClientRuleAssignment? AssignmentFor(Guid masterRuleId) =>
         assignments.FirstOrDefault(x => x.MasterRuleId == masterRuleId);
 
-    private void HandleRuleSetSearchInput(ChangeEventArgs e)
-    {
-        ruleSetSearchText = e.Value?.ToString() ?? string.Empty;
-        selectedRuleSetId = string.Empty;
-        showRuleSetSuggestions = true;
-    }
-
-    private void OpenRuleSetSuggestions(FocusEventArgs _)
-    {
-        showRuleSetSuggestions = true;
-    }
-
-    private void ToggleRuleSetSuggestions()
-    {
-        showRuleSetSuggestions = !showRuleSetSuggestions;
-    }
-
-    private void SelectRuleSet(RuleSet set)
-    {
-        selectedRuleSetId = set.Id.ToString();
-        ruleSetSearchText = set.Name;
-        showRuleSetSuggestions = false;
-    }
-
     private async Task AddRuleSetAsync()
     {
         Guid ruleSetId;
 
-        if (Guid.TryParse(selectedRuleSetId, out var selectedId))
+        if (!Guid.TryParse(selectedRuleSetId, out ruleSetId))
         {
-            ruleSetId = selectedId;
-        }
-        else
-        {
-            var exactMatch = AvailableRuleSetOptions.FirstOrDefault(x =>
-                string.Equals(x.Name, ruleSetSearchText.Trim(), StringComparison.OrdinalIgnoreCase));
-
-            if (exactMatch is not null)
-            {
-                ruleSetId = exactMatch.Id;
-            }
-            else
-            {
-                var matches = AvailableRuleSetOptions.ToList();
-                if (matches.Count != 1)
-                {
-                    message = matches.Count == 0
-                        ? "Start typing a Rule Set name."
-                        : "More than one Rule Set matches. Keep typing or choose one of the suggestions.";
-                    return;
-                }
-
-                ruleSetId = matches[0].Id;
-            }
+            message = "Select the Rule Set you want to add.";
+            return;
         }
 
         await RuleSetAssignments.AssignRuleSetToClientAsync(ClientId, ruleSetId);
         var setName = ruleSets.First(x => x.Id == ruleSetId).Name;
         message = $"Rule Set '{setName}' assigned.";
-        ruleSetSearchText = string.Empty;
         selectedRuleSetId = string.Empty;
-        showRuleSetSuggestions = false;
         await LoadAsync();
     }
 
