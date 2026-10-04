@@ -1,0 +1,317 @@
+using Microsoft.EntityFrameworkCore;
+using NPOI.HSSF.UserModel;
+using RuleManager.Core.Domain;
+using RuleManager.Data;
+using RuleManager.Data.Services;
+
+namespace RuleManager.Tests;
+
+public sealed class QuickBooksCompatibilityTests
+{
+    [Fact]
+    public async Task Import_ParsesVerifiedReusableRuleMappings_AndPreservesRawJson()
+    {
+        var organizationId = Guid.NewGuid();
+        var factory = CreateFactory(nameof(Import_ParsesVerifiedReusableRuleMappings_AndPreservesRawJson));
+        await SeedOrganizationAsync(factory, organizationId);
+
+        const string conditions = "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":1,\"value\":\"Sunoco\"}],\"isAndRule\":true}";
+        const string outputs = "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Auto:gas/ tolls\"},{\"actionType\":8,\"value\":true}]}";
+
+        using var workbook = BuildWorkbook(("Sunoco", conditions, outputs));
+        var service = new QuickBooksRuleImportService(factory);
+
+        var items = await service.AnalyzeAsync(organizationId, workbook);
+
+        var item = Assert.Single(items);
+        Assert.Equal(RuleImportStatus.New, item.Status);
+        Assert.Equal(RuleDirection.MoneyOut, item.Direction);
+        Assert.Equal(RuleTransactionType.Expense, item.TransactionType);
+        Assert.True(item.MatchAllConditions);
+        Assert.True(item.AutoAdd);
+        Assert.Equal("Auto:gas/ tolls", item.CategoryName);
+        Assert.Equal(conditions, item.OriginalConditionsJson);
+        Assert.Equal(outputs, item.OriginalOutputsJson);
+
+        var condition = Assert.Single(item.Conditions);
+        Assert.Equal(RuleMatchField.Description, condition.Field);
+        Assert.Equal(RuleMatchOperator.Contains, condition.Operator);
+        Assert.Equal("Sunoco", condition.Value);
+    }
+
+    [Fact]
+    public async Task Import_ParsesBankText_AnyCondition_Transfer_AndAutoAddOff()
+    {
+        var organizationId = Guid.NewGuid();
+        var factory = CreateFactory(nameof(Import_ParsesBankText_AnyCondition_Transfer_AndAutoAddOff));
+        await SeedOrganizationAsync(factory, organizationId);
+
+        const string conditions = "{\"ruleConditions\":[{\"ruleType\":6,\"value\":\"ACH TRACE\"},{\"ruleType\":10,\"value\":\"1\"}],\"isAndRule\":false}";
+        const string outputs = "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Transfers\"},{\"actionType\":7,\"value\":\"26\"}]}";
+
+        using var workbook = BuildWorkbook(("Incoming transfer", conditions, outputs));
+        var service = new QuickBooksRuleImportService(factory);
+
+        var item = Assert.Single(await service.AnalyzeAsync(organizationId, workbook));
+
+        Assert.Equal(RuleDirection.MoneyIn, item.Direction);
+        Assert.Equal(RuleTransactionType.Transfer, item.TransactionType);
+        Assert.False(item.MatchAllConditions);
+        Assert.False(item.AutoAdd);
+        var condition = Assert.Single(item.Conditions);
+        Assert.Equal(RuleMatchField.BankText, condition.Field);
+        Assert.Equal("ACH TRACE", condition.Value);
+    }
+
+    [Fact]
+    public async Task Import_ClassifiesCreditCardPayment_AsClientSpecific()
+    {
+        var organizationId = Guid.NewGuid();
+        var factory = CreateFactory(nameof(Import_ClassifiesCreditCardPayment_AsClientSpecific));
+        await SeedOrganizationAsync(factory, organizationId);
+
+        const string conditions = "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":1,\"value\":\"AMEX PAYMENT\"}],\"isAndRule\":true}";
+        const string outputs = "{\"ruleActions\":[{\"actionType\":0,\"value\":\"American Express 1234\"},{\"actionType\":7,\"value\":\"64\"}]}";
+
+        using var workbook = BuildWorkbook(("AMEX Payment", conditions, outputs));
+        var service = new QuickBooksRuleImportService(factory);
+
+        var item = Assert.Single(await service.AnalyzeAsync(organizationId, workbook));
+
+        Assert.Equal(RuleImportStatus.ClientSpecific, item.Status);
+        Assert.Equal(RuleTransactionType.CreditCardPayment, item.TransactionType);
+        Assert.True(item.IsAccountSpecific);
+        Assert.True(item.IsReadOnlyImport);
+        Assert.Equal(conditions, item.OriginalConditionsJson);
+        Assert.Equal(outputs, item.OriginalOutputsJson);
+    }
+
+    [Fact]
+    public async Task Export_WritesRulesInClientPriorityOrder()
+    {
+        var factory = CreateFactory(nameof(Export_WritesRulesInClientPriorityOrder));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var first = ReusableRule(organizationId, "First", "ONE");
+            var second = ReusableRule(organizationId, "Second", "TWO");
+            var third = ReusableRule(organizationId, "Third", "THREE");
+            db.MasterRules.AddRange(first, second, third);
+            db.ClientRuleAssignments.AddRange(
+                new ClientRuleAssignment { ClientId = clientId, MasterRuleId = second.Id, IsExplicit = true, ExportPriority = 2 },
+                new ClientRuleAssignment { ClientId = clientId, MasterRuleId = third.Id, IsExplicit = true, ExportPriority = 3 },
+                new ClientRuleAssignment { ClientId = clientId, MasterRuleId = first.Id, IsExplicit = true, ExportPriority = 1 });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new QuickBooksRuleExportService(factory);
+        var result = await service.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        Assert.NotNull(result.Content);
+
+        using var stream = new MemoryStream(result.Content!);
+        var names = ReadRuleNames(stream);
+        Assert.Equal(new[] { "First", "Second", "Third" }, names);
+    }
+
+    [Fact]
+    public async Task Export_PreservesClientSpecificQuickBooksJsonExactly()
+    {
+        var factory = CreateFactory(nameof(Export_PreservesClientSpecificQuickBooksJsonExactly));
+        var (_, clientId) = await SeedClientAsync(factory);
+
+        const string conditions = "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":1,\"value\":\"CARD PAY\"}],\"isAndRule\":true}";
+        const string outputs = "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Visa 4321\"},{\"actionType\":7,\"value\":\"64\"},{\"actionType\":8,\"value\":true}]}";
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.ClientRules.Add(new ClientRule
+            {
+                ClientId = clientId,
+                Name = "Card Payment",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.CreditCardPayment,
+                CategoryName = "Visa 4321",
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.Description,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "CARD PAY"
+                    }
+                },
+                AutoAdd = true,
+                IsAccountSpecific = true,
+                IsReadOnlyImport = true,
+                OriginalConditionsJson = conditions,
+                OriginalOutputsJson = outputs,
+                ExportPriority = 1
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new QuickBooksRuleExportService(factory);
+        var result = await service.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Equal("Card Payment", row.GetCell(0).StringCellValue);
+        Assert.Equal(conditions, row.GetCell(1).StringCellValue);
+        Assert.Equal(outputs, row.GetCell(2).StringCellValue);
+    }
+
+    [Fact]
+    public async Task Export_GeneratesVerifiedReusableJson_ForDescriptionCheckAndAutoAdd()
+    {
+        var factory = CreateFactory(nameof(Export_GeneratesVerifiedReusableJson_ForDescriptionCheckAndAutoAdd));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var rule = new MasterRule
+            {
+                OrganizationId = organizationId,
+                Name = "Check Rule",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.Check,
+                CategoryName = "Office Supplies",
+                AutoAdd = true,
+                MatchAllConditions = true,
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.Description,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "STAPLES"
+                    }
+                }
+            };
+            db.MasterRules.Add(rule);
+            db.ClientRuleAssignments.Add(new ClientRuleAssignment
+            {
+                ClientId = clientId,
+                MasterRuleId = rule.Id,
+                IsExplicit = true,
+                ExportPriority = 1
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new QuickBooksRuleExportService(factory);
+        var result = await service.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Equal(
+            "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":1,\"value\":\"STAPLES\"}],\"isAndRule\":true}",
+            row.GetCell(1).StringCellValue);
+
+        Assert.Equal(
+            "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Office Supplies\"},{\"actionType\":7,\"value\":\"3\"},{\"actionType\":8,\"value\":true}]}",
+            row.GetCell(2).StringCellValue);
+    }
+
+    private static TestDbContextFactory CreateFactory(string databaseName) =>
+        new(databaseName);
+
+    private static async Task SeedOrganizationAsync(TestDbContextFactory factory, Guid organizationId)
+    {
+        await using var db = await factory.CreateDbContextAsync();
+        db.Organizations.Add(new Organization { Id = organizationId, Name = "Test Firm" });
+        await db.SaveChangesAsync();
+    }
+
+    private static async Task<(Guid OrganizationId, Guid ClientId)> SeedClientAsync(TestDbContextFactory factory)
+    {
+        var organizationId = Guid.NewGuid();
+        var clientId = Guid.NewGuid();
+
+        await using var db = await factory.CreateDbContextAsync();
+        db.Organizations.Add(new Organization { Id = organizationId, Name = "Test Firm" });
+        db.Clients.Add(new Client
+        {
+            Id = clientId,
+            OrganizationId = organizationId,
+            Name = "Compatibility Test Client"
+        });
+        await db.SaveChangesAsync();
+        return (organizationId, clientId);
+    }
+
+    private static MasterRule ReusableRule(Guid organizationId, string name, string match) =>
+        new()
+        {
+            OrganizationId = organizationId,
+            Name = name,
+            Direction = RuleDirection.MoneyOut,
+            TransactionType = RuleTransactionType.Expense,
+            CategoryName = "Testing",
+            Conditions = new()
+            {
+                new RuleCondition
+                {
+                    Field = RuleMatchField.Description,
+                    Operator = RuleMatchOperator.Contains,
+                    Value = match
+                }
+            }
+        };
+
+    private static MemoryStream BuildWorkbook(params (string Name, string Conditions, string Outputs)[] rules)
+    {
+        using var workbook = new HSSFWorkbook();
+        var sheet = workbook.CreateSheet("Rules");
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue("Rule Name");
+        header.CreateCell(1).SetCellValue("Rule Conditions");
+        header.CreateCell(2).SetCellValue("Rule Outputs");
+
+        for (var i = 0; i < rules.Length; i++)
+        {
+            var row = sheet.CreateRow(i + 1);
+            row.CreateCell(0).SetCellValue(rules[i].Name);
+            row.CreateCell(1).SetCellValue(rules[i].Conditions);
+            row.CreateCell(2).SetCellValue(rules[i].Outputs);
+        }
+
+        var stream = new MemoryStream();
+        workbook.Write(stream);
+        stream.Position = 0;
+        return stream;
+    }
+
+    private static IReadOnlyList<string> ReadRuleNames(Stream stream)
+    {
+        using var workbook = new HSSFWorkbook(stream);
+        var sheet = workbook.GetSheetAt(0);
+        var names = new List<string>();
+
+        for (var i = 1; i <= sheet.LastRowNum; i++)
+            names.Add(sheet.GetRow(i).GetCell(0).StringCellValue);
+
+        return names;
+    }
+
+    private sealed class TestDbContextFactory(string databaseName) : IDbContextFactory<RuleManagerDbContext>
+    {
+        private readonly DbContextOptions<RuleManagerDbContext> options =
+            new DbContextOptionsBuilder<RuleManagerDbContext>()
+                .UseInMemoryDatabase(databaseName)
+                .Options;
+
+        public RuleManagerDbContext CreateDbContext() => new(options);
+
+        public Task<RuleManagerDbContext> CreateDbContextAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult(CreateDbContext());
+    }
+}
