@@ -11,3 +11,12 @@ window.downloadFileFromStream = async (fileName, contentStreamReference) => {
 
     URL.revokeObjectURL(url);
 };
+
+
+document.addEventListener("click", (event) => {
+    document.querySelectorAll("details.rule-action-menu[open]").forEach((menu) => {
+        if (!menu.contains(event.target)) {
+            menu.removeAttribute("open");
+        }
+    });
+});
