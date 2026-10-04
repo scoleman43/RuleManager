@@ -468,6 +468,7 @@ else
             MatchesRuleSearch(rule)
             && MatchesSource(rule)
             && MatchesDirection(rule)
+            && MatchesAutoAdd(rule)
             && MatchesCategory(rule))
         .OrderBy(rule => AssignmentFor(rule.Id)?.ExportPriority ?? int.MaxValue)
         .ThenBy(rule => rule.Name);
