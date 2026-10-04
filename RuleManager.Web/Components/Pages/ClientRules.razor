@@ -124,37 +124,43 @@ else
 
     @if (showDirectRulePicker)
     {
-        <div class="card mb-4 border-primary">
-            <div class="card-body">
-                <div class="d-flex justify-content-between align-items-start mb-3">
+        <div class="rule-modal-backdrop" @onclick="CloseDirectRulePicker">
+            <div class="rule-modal-dialog" @onclick:stopPropagation="true">
+                <div class="rule-modal-header">
                     <div>
-                        <h5 class="card-title mb-1">Add Direct Rule</h5>
-                        <div class="text-muted">Use this for a one-off rule that should apply to this client outside of its Rule Sets.</div>
+                        <div class="rule-modal-eyebrow">Direct assignment</div>
+                        <h5 class="mb-1">Add Direct Rule</h5>
+                        <div class="text-muted small">Use this for a one-off rule that should apply to this client outside of its Rule Sets.</div>
                     </div>
                     <button class="btn btn-sm btn-outline-secondary" @onclick="CloseDirectRulePicker">Close</button>
                 </div>
 
-                <div class="row g-3 align-items-end">
-                    <div class="col-lg-5">
-                        <label class="form-label">Find Rule</label>
-                        <input class="form-control"
-                               @bind="directRuleSearchText"
-                               @bind:event="oninput"
-                               placeholder="Start typing a rule name..." />
+                <div class="rule-modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Find Rule</label>
+                            <input class="form-control"
+                                   @bind="directRuleSearchText"
+                                   @bind:event="oninput"
+                                   placeholder="Start typing a rule name..." />
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Rule</label>
+                            <select class="form-select" @bind="selectedDirectRuleId">
+                                <option value="">-- Select Rule --</option>
+                                @foreach (var rule in DirectRuleOptions)
+                                {
+                                    <option value="@rule.Id">@rule.Name — @(rule.CategoryName ?? "No category")</option>
+                                }
+                            </select>
+                        </div>
                     </div>
-                    <div class="col-lg-5">
-                        <label class="form-label">Rule</label>
-                        <select class="form-select" @bind="selectedDirectRuleId">
-                            <option value="">-- Select Rule --</option>
-                            @foreach (var rule in DirectRuleOptions)
-                            {
-                                <option value="@rule.Id">@rule.Name — @(rule.CategoryName ?? "No category")</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-lg-2">
-                        <button class="btn btn-primary w-100" @onclick="AddDirectRuleAsync">Add</button>
-                    </div>
+                </div>
+
+                <div class="rule-modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="CloseDirectRulePicker">Cancel</button>
+                    <button class="btn btn-primary" @onclick="AddDirectRuleAsync">Add Rule</button>
                 </div>
             </div>
         </div>
