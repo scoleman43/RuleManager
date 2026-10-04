@@ -584,6 +584,8 @@ else
             .AsNoTracking()
             .ToListAsync());
 
+        await NormalizeExportPrioritiesAsync(db);
+
         categoryNames.Clear();
         categoryNames.AddRange(AssignedRules
             .Select(x => x.CategoryName)
@@ -591,6 +593,106 @@ else
             .Select(x => x!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x));
+    }
+
+    private async Task NormalizeExportPrioritiesAsync(RuleManagerDbContext db)
+    {
+        var clientSpecificNames = clientSpecificRules
+            .Select(x => x.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var visibleAssignmentRows = assignments
+            .Join(masterRules,
+                assignment => assignment.MasterRuleId,
+                rule => rule.Id,
+                (assignment, rule) => new
+                {
+                    Assignment = assignment,
+                    Rule = rule
+                })
+            .Where(x => !clientSpecificNames.Contains(x.Rule.Name))
+            .Select(x => new
+            {
+                EntityId = x.Assignment.Id,
+                IsClientSpecific = false,
+                StoredPriority = x.Assignment.ExportPriority,
+                CreatedUtc = x.Assignment.CreatedUtc,
+                Name = x.Rule.Name
+            });
+
+        var clientRows = clientSpecificRules.Select(rule => new
+        {
+            EntityId = rule.Id,
+            IsClientSpecific = true,
+            StoredPriority = rule.ExportPriority,
+            CreatedUtc = rule.CreatedUtc,
+            Name = rule.Name
+        });
+
+        var ordered = visibleAssignmentRows
+            .Concat(clientRows)
+            .OrderBy(x => x.StoredPriority <= 0 ? int.MaxValue : x.StoredPriority)
+            .ThenBy(x => x.CreatedUtc)
+            .ThenBy(x => x.Name)
+            .ToList();
+
+        var needsNormalization = ordered
+            .Select((row, index) => row.StoredPriority != index + 1)
+            .Any(x => x);
+
+        if (!needsNormalization)
+            return;
+
+        var assignmentIds = ordered
+            .Where(x => !x.IsClientSpecific)
+            .Select(x => x.EntityId)
+            .ToArray();
+
+        var clientRuleIds = ordered
+            .Where(x => x.IsClientSpecific)
+            .Select(x => x.EntityId)
+            .ToArray();
+
+        var assignmentEntities = await db.ClientRuleAssignments
+            .Where(x => assignmentIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+
+        var clientRuleEntities = await db.ClientRules
+            .Where(x => clientRuleIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id);
+
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var priority = i + 1;
+            var row = ordered[i];
+
+            if (row.IsClientSpecific)
+            {
+                if (clientRuleEntities.TryGetValue(row.EntityId, out var entity))
+                {
+                    entity.ExportPriority = priority;
+                    entity.ModifiedUtc = DateTime.UtcNow;
+                }
+
+                var loaded = clientSpecificRules.FirstOrDefault(x => x.Id == row.EntityId);
+                if (loaded is not null)
+                    loaded.ExportPriority = priority;
+            }
+            else
+            {
+                if (assignmentEntities.TryGetValue(row.EntityId, out var entity))
+                {
+                    entity.ExportPriority = priority;
+                    entity.ModifiedUtc = DateTime.UtcNow;
+                }
+
+                var loaded = assignments.FirstOrDefault(x => x.Id == row.EntityId);
+                if (loaded is not null)
+                    loaded.ExportPriority = priority;
+            }
+        }
+
+        await db.SaveChangesAsync();
     }
 
     private void BackToClients() => Navigation.NavigateTo("/clients");
