@@ -86,9 +86,10 @@ else
                         <tbody>
                             @foreach (var row in ExportOrderRows)
                             {
-                                <tr>
+                                <tr @key="row.EntityId">
                                     <td>
-                                        <input class="form-control form-control-sm export-priority-input"
+                                        <input @key="@($"{row.EntityId}:{row.Priority}")"
+                                               class="form-control form-control-sm export-priority-input"
                                                type="number"
                                                min="1"
                                                max="@ExportOrderRows.Count()"
