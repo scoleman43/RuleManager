@@ -551,3 +551,34 @@ a:hover, .btn-link:hover {
     color: var(--rm-green-dark);
     outline: none;
 }
+
+
+.autocomplete-input-group {
+    position: relative;
+}
+
+.autocomplete-input-group .form-control {
+    padding-right: 2.75rem;
+}
+
+.autocomplete-toggle {
+    position: absolute;
+    top: 50%;
+    right: 0.45rem;
+    transform: translateY(-50%);
+    width: 2rem;
+    height: 2rem;
+    border: 0;
+    border-radius: 0.4rem;
+    background: transparent;
+    color: #59635b;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.autocomplete-toggle:hover,
+.autocomplete-toggle:focus {
+    background: #f1f5f1;
+    color: var(--rm-green-dark);
+    outline: none;
+}
