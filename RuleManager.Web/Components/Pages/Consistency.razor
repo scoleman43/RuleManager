@@ -13,6 +13,46 @@
 <h1>Consistency</h1>
 <p class="text-muted">Review the Rule Sets and rules currently expected for each client.</p>
 
+<div class="card mb-4">
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-6">
+                <label class="form-label">Search clients</label>
+                <input class="form-control"
+                       @bind="searchText"
+                       @bind:event="oninput"
+                       placeholder="Client name..." />
+            </div>
+
+            <div class="col-md-4 col-lg-3">
+                <label class="form-label">Overall</label>
+                <select class="form-select" @bind="overallFilter">
+                    <option value="all">All clients</option>
+                    <option value="aligned">Aligned</option>
+                    <option value="review">Needs review</option>
+                    <option value="none">No rules selected</option>
+                </select>
+            </div>
+
+            <div class="col-md-4 col-lg-3">
+                <label class="form-label">Rule Sets</label>
+                <select class="form-select" @bind="ruleSetFilter">
+                    <option value="all">All</option>
+                    <option value="with">Has Rule Set</option>
+                    <option value="without">No Rule Set</option>
+                </select>
+            </div>
+        </div>
+
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <div class="text-muted small">
+                Showing @FilteredRows.Count() of @rows.Count client(s)
+            </div>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="ClearFilters">Clear Filters</button>
+        </div>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-body p-0">
         @if (rows.Count == 0)
@@ -35,7 +75,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var row in rows)
+                        @foreach (var row in FilteredRows)
                         {
                             <tr>
                                 <td><strong>@row.ClientName</strong></td>
@@ -74,6 +114,14 @@
 
 @code {
     private readonly List<ConsistencyRow> rows = new();
+    private string searchText = string.Empty;
+    private string overallFilter = "all";
+    private string ruleSetFilter = "all";
+
+    private IEnumerable<ConsistencyRow> FilteredRows => rows.Where(row =>
+        MatchesSearch(row)
+        && MatchesOverall(row)
+        && MatchesRuleSetFilter(row));
 
     protected override async Task OnInitializedAsync()
     {
@@ -150,6 +198,38 @@
                 directRuleIds.Length,
                 missingAssignmentCount));
         }
+    }
+
+    private bool MatchesSearch(ConsistencyRow row)
+    {
+        if (string.IsNullOrWhiteSpace(searchText))
+            return true;
+
+        return row.ClientName.Contains(
+            searchText.Trim(),
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private bool MatchesOverall(ConsistencyRow row) => overallFilter switch
+    {
+        "aligned" => row.ExpectedRuleCount > 0 && row.MissingAssignmentCount == 0,
+        "review" => row.ExpectedRuleCount > 0 && row.MissingAssignmentCount > 0,
+        "none" => row.ExpectedRuleCount == 0,
+        _ => true
+    };
+
+    private bool MatchesRuleSetFilter(ConsistencyRow row) => ruleSetFilter switch
+    {
+        "with" => row.RuleSetCount > 0,
+        "without" => row.RuleSetCount == 0,
+        _ => true
+    };
+
+    private void ClearFilters()
+    {
+        searchText = string.Empty;
+        overallFilter = "all";
+        ruleSetFilter = "all";
     }
 
     private void OpenClientRules(Guid clientId) =>
