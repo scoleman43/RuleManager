@@ -390,6 +390,93 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public void SplitCodec_ParsesAndSerializesVerifiedPercentageAndAmountFormats()
+    {
+        const string percentageOutputs = "{\"ruleActions\":[{\"actionType\":6,\"value\":{\"actionInfoList\":[{\"categoryId\":\"Testing A\",\"splitValue\":\"50\",\"splitType\":\"percentage\"},{\"categoryId\":\"Testing B\",\"splitValue\":\"50\",\"splitType\":\"percentage\"}]}}]}";
+        const string amountOutputs = "{\"ruleActions\":[{\"actionType\":6,\"value\":{\"actionInfoList\":[{\"categoryId\":\"Testing A\",\"splitValue\":\"25\",\"splitType\":\"amount\"},{\"categoryId\":\"Testing B\",\"splitValue\":\"R\",\"splitType\":\"amount\"}]}}]}";
+
+        Assert.True(QuickBooksSplitRuleCodec.TryParse(percentageOutputs, out var percentage));
+        Assert.NotNull(percentage);
+        Assert.Equal(QuickBooksSplitType.Percentage, percentage!.Type);
+        Assert.Equal(2, percentage.Lines.Count);
+        Assert.Null(QuickBooksSplitRuleCodec.Validate(percentage));
+        Assert.Equal(percentageOutputs, QuickBooksSplitRuleCodec.Serialize(percentage));
+
+        Assert.True(QuickBooksSplitRuleCodec.TryParse(amountOutputs, out var amount));
+        Assert.NotNull(amount);
+        Assert.Equal(QuickBooksSplitType.Amount, amount!.Type);
+        Assert.Equal(2, amount.Lines.Count);
+        Assert.True(amount.Lines[1].IsRemainder);
+        Assert.Null(QuickBooksSplitRuleCodec.Validate(amount));
+        Assert.Equal(amountOutputs, QuickBooksSplitRuleCodec.Serialize(amount));
+    }
+
+    [Fact]
+    public async Task Export_GeneratesEditableSplitRuleJson_FromCurrentConditionsAndSplitDefinition()
+    {
+        var factory = CreateFactory(nameof(Export_GeneratesEditableSplitRuleJson_FromCurrentConditionsAndSplitDefinition));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        var splitDefinition = new QuickBooksSplitDefinition
+        {
+            Type = QuickBooksSplitType.Percentage,
+            Lines = new()
+            {
+                new QuickBooksSplitLine { CategoryName = "Testing A", Value = "60" },
+                new QuickBooksSplitLine { CategoryName = "Testing B", Value = "40" }
+            }
+        };
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var rule = new MasterRule
+            {
+                OrganizationId = organizationId,
+                Name = "Editable split",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.Expense,
+                MatchAllConditions = true,
+                IsReadOnlyImport = false,
+                OriginalOutputsJson = QuickBooksSplitRuleCodec.Serialize(splitDefinition),
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.BankText,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "SPLIT TEST"
+                    }
+                }
+            };
+
+            db.MasterRules.Add(rule);
+            db.ClientRuleAssignments.Add(new ClientRuleAssignment
+            {
+                ClientId = clientId,
+                MasterRuleId = rule.Id,
+                IsExplicit = true,
+                ExportPriority = 1
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exportService = new QuickBooksRuleExportService(factory);
+        var result = await exportService.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Equal(
+            "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"SPLIT TEST\"}],\"isAndRule\":true}",
+            row.GetCell(1).StringCellValue);
+        Assert.Equal(
+            "{\"ruleActions\":[{\"actionType\":6,\"value\":{\"actionInfoList\":[{\"categoryId\":\"Testing A\",\"splitValue\":\"60\",\"splitType\":\"percentage\"},{\"categoryId\":\"Testing B\",\"splitValue\":\"40\",\"splitType\":\"percentage\"}]}}]}",
+            row.GetCell(2).StringCellValue);
+    }
+
+    [Fact]
     public async Task Export_WritesRulesInClientPriorityOrder()
     {
         var factory = CreateFactory(nameof(Export_WritesRulesInClientPriorityOrder));
