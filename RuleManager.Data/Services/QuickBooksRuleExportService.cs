@@ -148,10 +148,29 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             return null;
         }
 
-        if (string.IsNullOrWhiteSpace(rule.CategoryName))
+        var isSplitRule = QuickBooksSplitRuleCodec.TryParse(rule.OriginalOutputsJson, out var splitDefinition);
+
+        if (!isSplitRule && string.IsNullOrWhiteSpace(rule.CategoryName))
         {
             error = "A QuickBooks category is required.";
             return null;
+        }
+
+        if (isSplitRule)
+        {
+            var splitError = QuickBooksSplitRuleCodec.Validate(splitDefinition!);
+            if (splitError is not null)
+            {
+                error = splitError;
+                return null;
+            }
+
+            if (rule.Direction != RuleDirection.MoneyOut
+                || rule.TransactionType != RuleTransactionType.Expense)
+            {
+                error = "Editable split export is currently verified only for Money out / Expense rules.";
+                return null;
+            }
         }
 
         if (rule.Conditions.Count == 0)
@@ -212,61 +231,72 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             ["isAndRule"] = rule.MatchAllConditions
         };
 
-        var actionObjects = new List<Dictionary<string, object?>>
+        string outputsJson;
+
+        if (isSplitRule)
         {
-            new()
+            outputsJson = QuickBooksSplitRuleCodec.Serialize(splitDefinition!);
+        }
+        else
+        {
+            var actionObjects = new List<Dictionary<string, object?>>
             {
-                ["actionType"] = 0,
-                ["value"] = rule.CategoryName
+                new()
+                {
+                    ["actionType"] = 0,
+                    ["value"] = rule.CategoryName
+                }
+            };
+
+            var transactionCode = GetTransactionCode(rule);
+
+            if (transactionCode is null
+                && rule.TransactionType is not RuleTransactionType.Expense
+                && rule.TransactionType is not RuleTransactionType.Deposit)
+            {
+                error = $"The transaction type '{FormatTransactionType(rule.TransactionType)}' does not have a verified QuickBooks export mapping.";
+                return null;
             }
-        };
 
-        var transactionCode = GetTransactionCode(rule);
-
-        if (transactionCode is null
-            && rule.TransactionType is not RuleTransactionType.Expense
-            && rule.TransactionType is not RuleTransactionType.Deposit)
-        {
-            error = $"The transaction type '{FormatTransactionType(rule.TransactionType)}' does not have a verified QuickBooks export mapping.";
-            return null;
-        }
-
-        if (transactionCode is not null)
-        {
-            actionObjects.Add(new Dictionary<string, object?>
+            if (transactionCode is not null)
             {
-                ["actionType"] = 7,
-                ["value"] = transactionCode
-            });
-        }
+                actionObjects.Add(new Dictionary<string, object?>
+                {
+                    ["actionType"] = 7,
+                    ["value"] = transactionCode
+                });
+            }
 
-        if (!string.IsNullOrWhiteSpace(rule.Payee))
-        {
-            actionObjects.Add(new Dictionary<string, object?>
+            if (!string.IsNullOrWhiteSpace(rule.Payee))
             {
-                ["actionType"] = 5,
-                ["value"] = rule.Payee
-            });
-        }
+                actionObjects.Add(new Dictionary<string, object?>
+                {
+                    ["actionType"] = 5,
+                    ["value"] = rule.Payee
+                });
+            }
 
-        if (rule.AutoAdd)
-        {
-            actionObjects.Add(new Dictionary<string, object?>
+            if (rule.AutoAdd)
             {
-                ["actionType"] = 8,
-                ["value"] = true
-            });
-        }
+                actionObjects.Add(new Dictionary<string, object?>
+                {
+                    ["actionType"] = 8,
+                    ["value"] = true
+                });
+            }
 
-        var outputs = new Dictionary<string, object?>
-        {
-            ["ruleActions"] = actionObjects
-        };
+            var outputs = new Dictionary<string, object?>
+            {
+                ["ruleActions"] = actionObjects
+            };
+
+            outputsJson = JsonSerializer.Serialize(outputs);
+        }
 
         return new ExportRow(
             rule.Name,
             JsonSerializer.Serialize(conditions),
-            JsonSerializer.Serialize(outputs));
+            outputsJson);
     }
 
     private static bool TryGetConditionRuleType(RuleCondition condition, out int ruleType)
