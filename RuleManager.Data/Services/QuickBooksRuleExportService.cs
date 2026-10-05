@@ -46,7 +46,7 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             .ToListAsync(cancellationToken);
 
         var clientSpecificRules = await db.ClientRules
-            .Where(x => x.ClientId == clientId)
+            .Where(x => x.ClientId == clientId && x.IsAccountSpecific)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
