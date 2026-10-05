@@ -203,7 +203,7 @@
                                 </td>
                                 <td class="text-end">
                                     <div class="d-inline-flex align-items-center justify-content-end gap-2 flex-nowrap rule-actions">
-                                        @if (rule.IsReadOnlyImport)
+                                        @if (rule.IsReadOnlyImport && !QuickBooksSplitRuleCodec.IsSplitRule(rule.OriginalOutputsJson))
                                         {
                                             <button class="btn btn-sm btn-outline-secondary" disabled title="This imported QuickBooks rule is preserved exactly and is not editable yet.">Preserved</button>
                                         }
