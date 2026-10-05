@@ -1,6 +1,5 @@
 @page "/rules/new"
 @page "/rules/{RuleId:guid}/edit"
-@page "/client-rules/{ClientRuleId:guid}/edit"
 @rendermode InteractiveServer
 @using Microsoft.EntityFrameworkCore
 @using RuleManager.Core.Domain
@@ -45,45 +44,53 @@ else
     {
         <div class="card mb-3">
             <div class="card-body">
-                <h5 class="card-title mb-1">Clone Destination</h5>
+                <h5 class="card-title mb-1">Assign New Rule</h5>
                 <div class="text-muted small mb-3">
-                    Choose whether this clone becomes another reusable rule or a client-specific customization.
+                    A clone always creates a new reusable rule. You can assign it directly to a client, add it to one or more Rule Sets, do both, or leave it unassigned.
                 </div>
 
                 <div class="row g-3">
-                    <div class="col-md-5">
-                        <label class="form-label">Save clone as</label>
-                        <select class="form-select" @bind="cloneScope">
-                            <option value="shared">Reusable / shared rule</option>
-                            <option value="client">Client-specific rule</option>
+                    <div class="col-md-6">
+                        <label class="form-label">Direct assignment</label>
+                        <select class="form-select" @bind="selectedCloneClientId">
+                            <option value="">-- No direct client assignment --</option>
+                            @foreach (var option in activeClients)
+                            {
+                                <option value="@option.Id">@option.Name</option>
+                            }
                         </select>
+                        @if (CloneClientId.HasValue)
+                        {
+                            <div class="form-text">This client was selected automatically because the clone was started from its Client Rules page.</div>
+                        }
                     </div>
 
-                    @if (cloneScope == "client")
-                    {
-                        <div class="col-md-7">
-                            <label class="form-label">Client</label>
-                            <select class="form-select" @bind="selectedCloneClientId">
-                                <option value="">-- Select client --</option>
-                                @foreach (var option in activeClients)
+                    <div class="col-md-6">
+                        <label class="form-label">Rule Sets</label>
+                        @if (activeRuleSets.Count == 0)
+                        {
+                            <div class="form-control text-muted">No active Rule Sets</div>
+                        }
+                        else
+                        {
+                            <div class="border rounded p-2" style="max-height: 180px; overflow-y: auto;">
+                                @foreach (var set in activeRuleSets)
                                 {
-                                    <option value="@option.Id">@option.Name</option>
+                                    <div class="form-check">
+                                        <input class="form-check-input"
+                                               type="checkbox"
+                                               checked="@selectedCloneRuleSetIds.Contains(set.Id)"
+                                               @onchange="e => ToggleCloneRuleSet(set.Id, e)" />
+                                        <label class="form-check-label">@set.Name</label>
+                                    </div>
                                 }
-                            </select>
-                            <div class="form-text">
-                                Keeping the original rule name will replace/shadow the reusable rule for this client's QuickBooks export.
-                                Changing the name creates an additional client-specific rule instead.
                             </div>
-                        </div>
-                    }
-                    else
-                    {
-                        <div class="col-md-7 d-flex align-items-end">
-                            <div class="form-text mb-2">
-                                A reusable clone becomes a new master rule that can be assigned to any client or Rule Set.
-                            </div>
-                        </div>
-                    }
+                        }
+                    </div>
+                </div>
+
+                <div class="form-text mt-3">
+                    Client-specific rules are reserved for QuickBooks rules that contain client-bound data and cannot be safely shared.
                 </div>
             </div>
         </div>
@@ -325,14 +332,14 @@ else
 
 @code {
     [Parameter] public Guid? RuleId { get; set; }
-    [Parameter] public Guid? ClientRuleId { get; set; }
     [SupplyParameterFromQuery(Name = "cloneFrom")] public Guid? CloneFrom { get; set; }
     [SupplyParameterFromQuery(Name = "clientId")] public Guid? CloneClientId { get; set; }
-    [SupplyParameterFromQuery(Name = "scope")] public string? CloneScopeQuery { get; set; }
 
     private Guid organizationId;
     private readonly List<Category> categories = new();
     private readonly List<Client> activeClients = new();
+    private readonly List<RuleSet> activeRuleSets = new();
+    private readonly HashSet<Guid> selectedCloneRuleSetIds = new();
     private readonly List<RuleCondition> conditions = new();
 
     private string ruleName = string.Empty;
@@ -349,26 +356,20 @@ else
     private string overrideCategoryName = string.Empty;
     private bool loadedReadOnlyImport;
     private bool isSplitRule;
-    private string cloneScope = "shared";
     private string selectedCloneClientId = string.Empty;
-    private Guid? editingClientId;
     private QuickBooksSplitType splitType = QuickBooksSplitType.Percentage;
     private readonly List<QuickBooksSplitLine> splitLines = new();
 
     private bool IsClone => CloneFrom.HasValue;
-    private string EditorTitle => ClientRuleId.HasValue
-        ? "Edit Client-Specific Rule"
-        : IsClone
-            ? "Clone Rule"
-            : RuleId.HasValue
-                ? "Edit Rule"
-                : "New Rule";
+    private string EditorTitle => IsClone
+        ? "Clone Rule"
+        : RuleId.HasValue
+            ? "Edit Rule"
+            : "New Rule";
 
-    private string EditorSubtitle => ClientRuleId.HasValue
-        ? "Update a rule that belongs only to this client."
-        : IsClone
-            ? "Start from an existing rule, make your changes, then choose whether the result is shared or client-specific."
-            : "Create or update a reusable rule.";
+    private string EditorSubtitle => IsClone
+        ? "Create a new reusable rule from an existing rule, then choose where it should be assigned."
+        : "Create or update a reusable rule.";
 
     private IReadOnlyList<RuleTransactionType> AllowedTransactionTypes =>
         MasterRulePolicy.GetAllowedTransactionTypes(direction);
@@ -378,10 +379,9 @@ else
         organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
         await LoadCategoriesAsync();
         await LoadClientsAsync();
+        await LoadRuleSetsAsync();
 
-        if (ClientRuleId.HasValue)
-            await LoadClientRuleAsync(ClientRuleId.Value);
-        else if (RuleId.HasValue)
+        if (RuleId.HasValue)
             await LoadRuleAsync(RuleId.Value);
         else if (CloneFrom.HasValue)
             await LoadCloneAsync(CloneFrom.Value);
@@ -411,6 +411,17 @@ else
             .ToListAsync());
     }
 
+    private async Task LoadRuleSetsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        activeRuleSets.Clear();
+        activeRuleSets.AddRange(await db.RuleSets
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+    }
+
     private async Task LoadCloneAsync(Guid sourceRuleId)
     {
         await using var db = await DbFactory.CreateDbContextAsync();
@@ -425,43 +436,11 @@ else
         }
 
         ResetForm();
-        cloneScope = string.Equals(CloneScopeQuery, "client", StringComparison.OrdinalIgnoreCase)
-            || CloneClientId.HasValue
-            ? "client"
-            : "shared";
         selectedCloneClientId = CloneClientId?.ToString() ?? string.Empty;
 
         LoadRuleValues(source);
-        ruleName = cloneScope == "client" ? source.Name : $"{source.Name} - Copy";
+        ruleName = $"{source.Name} - Copy";
         loadedReadOnlyImport = source.IsReadOnlyImport && !isSplitRule;
-    }
-
-    private async Task LoadClientRuleAsync(Guid id)
-    {
-        await using var db = await DbFactory.CreateDbContextAsync();
-        var rule = await db.ClientRules
-            .AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == id);
-
-        if (rule is null)
-        {
-            Navigation.NavigateTo("/clients");
-            return;
-        }
-
-        var owningClient = await db.Clients
-            .AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == rule.ClientId);
-
-        if (owningClient is null || owningClient.OrganizationId != organizationId)
-        {
-            Navigation.NavigateTo("/clients");
-            return;
-        }
-
-        editingClientId = rule.ClientId;
-        LoadRuleValues(rule);
-        loadedReadOnlyImport = rule.IsReadOnlyImport && !isSplitRule;
     }
 
     private void LoadRuleValues(RuleBase rule)
@@ -538,9 +517,8 @@ else
         overrideCategoryName = string.Empty;
         loadedReadOnlyImport = false;
         isSplitRule = false;
-        cloneScope = "shared";
         selectedCloneClientId = string.Empty;
-        editingClientId = null;
+        selectedCloneRuleSetIds.Clear();
         splitType = QuickBooksSplitType.Percentage;
         splitLines.Clear();
 
@@ -556,12 +534,19 @@ else
 
     private void ReturnToRules()
     {
-        if (ClientRuleId.HasValue && editingClientId.HasValue)
-            Navigation.NavigateTo($"/clients/{editingClientId.Value}/rules");
-        else if (IsClone && cloneScope == "client" && Guid.TryParse(selectedCloneClientId, out var clientId))
-            Navigation.NavigateTo($"/clients/{clientId}/rules");
+        if (IsClone && CloneClientId.HasValue)
+            Navigation.NavigateTo($"/clients/{CloneClientId.Value}/rules");
         else
             Navigation.NavigateTo("/rules");
+    }
+
+    private void ToggleCloneRuleSet(Guid ruleSetId, ChangeEventArgs e)
+    {
+        var selected = e.Value is bool value && value;
+        if (selected)
+            selectedCloneRuleSetIds.Add(ruleSetId);
+        else
+            selectedCloneRuleSetIds.Remove(ruleSetId);
     }
 
     private void ToggleCategoryOverride()
@@ -804,63 +789,6 @@ else
 
         await using var db = await DbFactory.CreateDbContextAsync();
 
-        if (ClientRuleId.HasValue || (IsClone && cloneScope == "client"))
-        {
-            Guid clientId;
-
-            if (ClientRuleId.HasValue)
-            {
-                clientId = editingClientId
-                    ?? throw new InvalidOperationException("The client-specific rule does not have an owning client.");
-            }
-            else if (!Guid.TryParse(selectedCloneClientId, out clientId))
-            {
-                SetError("Select the client that should receive this client-specific clone.");
-                return;
-            }
-
-            ClientRule entity;
-            var isNewClientRule = !ClientRuleId.HasValue;
-
-            if (ClientRuleId.HasValue)
-            {
-                entity = await db.ClientRules.SingleAsync(x => x.Id == ClientRuleId.Value);
-            }
-            else
-            {
-                var assignmentPriority = CloneFrom.HasValue
-                    ? await db.ClientRuleAssignments
-                        .Where(x => x.ClientId == clientId && x.MasterRuleId == CloneFrom.Value)
-                        .Select(x => (int?)x.ExportPriority)
-                        .FirstOrDefaultAsync()
-                    : null;
-
-                var currentMax = Math.Max(
-                    await db.ClientRuleAssignments
-                        .Where(x => x.ClientId == clientId)
-                        .Select(x => (int?)x.ExportPriority)
-                        .MaxAsync() ?? 0,
-                    await db.ClientRules
-                        .Where(x => x.ClientId == clientId)
-                        .Select(x => (int?)x.ExportPriority)
-                        .MaxAsync() ?? 0);
-
-                entity = new ClientRule
-                {
-                    ClientId = clientId,
-                    SourceMasterRuleId = CloneFrom,
-                    ExportPriority = assignmentPriority ?? currentMax + 1
-                };
-                db.ClientRules.Add(entity);
-            }
-
-            ApplyFormValues(entity, name, selectedCategoryId, selectedCategoryName, splitDefinition);
-            await db.SaveChangesAsync();
-
-            Navigation.NavigateTo($"/clients/{clientId}/rules");
-            return;
-        }
-
         var isNewMasterRule = !RuleId.HasValue;
 
         if (isNewMasterRule)
@@ -871,7 +799,7 @@ else
 
             if (duplicateName)
             {
-                SetError($"A reusable rule named '{name}' already exists. Use a different name, or save the clone as client-specific.");
+                SetError($"A reusable rule named '{name}' already exists. Use a different name for the cloned rule.");
                 return;
             }
         }
@@ -892,6 +820,68 @@ else
 
         ApplyFormValues(masterEntity, name, selectedCategoryId, selectedCategoryName, splitDefinition);
         await db.SaveChangesAsync();
+
+        if (IsClone)
+        {
+            if (Guid.TryParse(selectedCloneClientId, out var cloneClientId))
+            {
+                var currentMax = Math.Max(
+                    await db.ClientRuleAssignments
+                        .Where(x => x.ClientId == cloneClientId)
+                        .Select(x => (int?)x.ExportPriority)
+                        .MaxAsync() ?? 0,
+                    await db.ClientRules
+                        .Where(x => x.ClientId == cloneClientId)
+                        .Select(x => (int?)x.ExportPriority)
+                        .MaxAsync() ?? 0);
+
+                db.ClientRuleAssignments.Add(new ClientRuleAssignment
+                {
+                    ClientId = cloneClientId,
+                    MasterRuleId = masterEntity.Id,
+                    IsExplicit = true,
+                    Status = RuleAssignmentStatus.Inherited,
+                    ExportPriority = currentMax + 1
+                });
+            }
+
+            var selectedSetIds = selectedCloneRuleSetIds.ToArray();
+            if (selectedSetIds.Length > 0)
+            {
+                var existingSetIds = await db.RuleSets
+                    .Where(x => x.OrganizationId == organizationId
+                        && x.IsActive
+                        && selectedSetIds.Contains(x.Id))
+                    .Select(x => x.Id)
+                    .ToListAsync();
+
+                foreach (var setId in existingSetIds)
+                {
+                    var nextOrder = await db.RuleSetRules
+                        .Where(x => x.RuleSetId == setId)
+                        .Select(x => (int?)x.SortOrder)
+                        .MaxAsync() ?? 0;
+
+                    db.RuleSetRules.Add(new RuleSetRule
+                    {
+                        RuleSetId = setId,
+                        MasterRuleId = masterEntity.Id,
+                        SortOrder = nextOrder + 1
+                    });
+                }
+            }
+
+            await db.SaveChangesAsync();
+
+            if (CloneClientId.HasValue)
+            {
+                Navigation.NavigateTo($"/clients/{CloneClientId.Value}/rules");
+                return;
+            }
+
+            Navigation.NavigateTo("/rules");
+            return;
+        }
 
         if (isNewMasterRule)
         {
