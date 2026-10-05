@@ -294,6 +294,102 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Import_PreservesVerifiedPercentageAndAmountSplitRules_ForLosslessExport()
+    {
+        var organizationId = Guid.NewGuid();
+        var factory = CreateFactory(nameof(Import_PreservesVerifiedPercentageAndAmountSplitRules_ForLosslessExport));
+        await SeedOrganizationAsync(factory, organizationId);
+
+        const string percentageConditions = "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"T033\"}],\"isAndRule\":true}";
+        const string percentageOutputs = "{\"ruleActions\":[{\"actionType\":6,\"value\":{\"actionInfoList\":[{\"categoryId\":\"Testing A\",\"splitValue\":\"50\",\"splitType\":\"percentage\"},{\"categoryId\":\"Testing B\",\"splitValue\":\"50\",\"splitType\":\"percentage\"}]}}]}";
+
+        const string amountConditions = "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"T034\"}],\"isAndRule\":true}";
+        const string amountOutputs = "{\"ruleActions\":[{\"actionType\":6,\"value\":{\"actionInfoList\":[{\"categoryId\":\"Testing A\",\"splitValue\":\"25\",\"splitType\":\"amount\"},{\"categoryId\":\"Testing B\",\"splitValue\":\"R\",\"splitType\":\"amount\"}]}}]}";
+
+        using var workbook = BuildWorkbook(
+            ("T033", percentageConditions, percentageOutputs),
+            ("T034", amountConditions, amountOutputs));
+
+        var importService = new QuickBooksRuleImportService(factory);
+        var items = await importService.AnalyzeAsync(organizationId, workbook);
+
+        Assert.Equal(2, items.Count);
+        Assert.All(items, item =>
+        {
+            Assert.Equal(RuleImportStatus.New, item.Status);
+            Assert.True(item.IsSplitRule);
+            Assert.True(item.IsReadOnlyImport);
+            Assert.Null(item.UnsupportedReason);
+            Assert.True(item.Selected);
+        });
+
+        await importService.ApplyAsync(organizationId, items);
+
+        await using var db = await factory.CreateDbContextAsync();
+        var rules = await db.MasterRules.OrderBy(x => x.Name).ToListAsync();
+
+        Assert.Equal(2, rules.Count);
+        Assert.All(rules, rule => Assert.True(rule.IsReadOnlyImport));
+        Assert.Equal(percentageOutputs, rules[0].OriginalOutputsJson);
+        Assert.Equal(amountOutputs, rules[1].OriginalOutputsJson);
+    }
+
+    [Fact]
+    public async Task Export_PreservesImportedSplitRuleJsonExactly()
+    {
+        var factory = CreateFactory(nameof(Export_PreservesImportedSplitRuleJsonExactly));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        const string conditions = "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"T033\"}],\"isAndRule\":true}";
+        const string outputs = "{\"ruleActions\":[{\"actionType\":6,\"value\":{\"actionInfoList\":[{\"categoryId\":\"Testing A\",\"splitValue\":\"50\",\"splitType\":\"percentage\"},{\"categoryId\":\"Testing B\",\"splitValue\":\"50\",\"splitType\":\"percentage\"}]}}]}";
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var rule = new MasterRule
+            {
+                OrganizationId = organizationId,
+                Name = "T033",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.Expense,
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.BankText,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "T033"
+                    }
+                },
+                IsReadOnlyImport = true,
+                OriginalConditionsJson = conditions,
+                OriginalOutputsJson = outputs
+            };
+
+            db.MasterRules.Add(rule);
+            db.ClientRuleAssignments.Add(new ClientRuleAssignment
+            {
+                ClientId = clientId,
+                MasterRuleId = rule.Id,
+                IsExplicit = true,
+                ExportPriority = 1
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var exportService = new QuickBooksRuleExportService(factory);
+        var result = await exportService.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Equal("T033", row.GetCell(0).StringCellValue);
+        Assert.Equal(conditions, row.GetCell(1).StringCellValue);
+        Assert.Equal(outputs, row.GetCell(2).StringCellValue);
+    }
+
+    [Fact]
     public async Task Export_WritesRulesInClientPriorityOrder()
     {
         var factory = CreateFactory(nameof(Export_WritesRulesInClientPriorityOrder));
