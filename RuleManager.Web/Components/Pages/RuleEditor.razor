@@ -50,7 +50,7 @@ else
 
                 <div class="col-md-3">
                     <label class="form-label">Money direction</label>
-                    <select class="form-select" value="@direction" @onchange="DirectionChanged">
+                    <select class="form-select" value="@direction" @onchange="DirectionChanged" disabled="@isSplitRule">
                         <option value="@RuleDirection.MoneyOut">Money out</option>
                         <option value="@RuleDirection.MoneyIn">Money in</option>
                     </select>
@@ -58,7 +58,7 @@ else
 
                 <div class="col-md-3">
                     <label class="form-label">Transaction type</label>
-                    <select class="form-select" @bind="transactionType">
+                    <select class="form-select" @bind="transactionType" disabled="@isSplitRule">
                         @foreach (var type in AllowedTransactionTypes)
                         {
                             <option value="@type">@FormatTransactionType(type)</option>
@@ -67,36 +67,55 @@ else
                 </div>
 
                 <div class="col-md-6">
-                    <label class="form-label">Category</label>
-                    <div class="input-group">
-                        <select class="form-select" @bind="categoryId">
-                            <option value="">-- Select category --</option>
-                            @foreach (var category in categories.Where(x => x.IsActive))
-                            {
-                                <option value="@category.Id">@category.Name</option>
-                            }
-                        </select>
-                        <button class="btn btn-outline-secondary" type="button" @onclick="ToggleCategoryCreator">
-                            @(showCategoryCreator ? "Cancel" : "New Category")
-                        </button>
+                    <label class="form-label d-block">Rule output</label>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input"
+                               type="checkbox"
+                               checked="@isSplitRule"
+                               @onchange="SplitRuleChanged"
+                               id="splitRule" />
+                        <label class="form-check-label" for="splitRule">Split transaction across multiple categories</label>
                     </div>
-
-                    @if (showCategoryCreator)
+                    @if (isSplitRule)
                     {
-                        <div class="mt-2">
-                            <div class="input-group">
-                                <input class="form-control" @bind="newCategoryName" placeholder="Example: Auto:Insurance" />
-                                <button class="btn btn-outline-primary" type="button" @onclick="CreateCategoryAsync">Create & Select</button>
-                            </div>
-                            <div class="form-text">Use a colon to separate main and subcategory names.</div>
-                        </div>
+                        <div class="form-text">Verified QuickBooks split export currently supports Money out / Expense rules.</div>
                     }
                 </div>
 
-                <div class="col-md-6">
-                    <label class="form-label">Payee</label>
-                    <input class="form-control" @bind="payee" />
-                </div>
+                @if (!isSplitRule)
+                {
+                    <div class="col-md-6">
+                        <label class="form-label">Category</label>
+                        <div class="input-group">
+                            <select class="form-select" @bind="categoryId">
+                                <option value="">-- Select category --</option>
+                                @foreach (var category in categories.Where(x => x.IsActive))
+                                {
+                                    <option value="@category.Id">@category.Name</option>
+                                }
+                            </select>
+                            <button class="btn btn-outline-secondary" type="button" @onclick="ToggleCategoryCreator">
+                                @(showCategoryCreator ? "Cancel" : "New Category")
+                            </button>
+                        </div>
+
+                        @if (showCategoryCreator)
+                        {
+                            <div class="mt-2">
+                                <div class="input-group">
+                                    <input class="form-control" @bind="newCategoryName" placeholder="Example: Auto:Insurance" />
+                                    <button class="btn btn-outline-primary" type="button" @onclick="CreateCategoryAsync">Create & Select</button>
+                                </div>
+                                <div class="form-text">Use a colon to separate main and subcategory names.</div>
+                            </div>
+                        }
+                    </div>
+
+                    <div class="col-md-6">
+                        <label class="form-label">Payee</label>
+                        <input class="form-control" @bind="payee" />
+                    </div>
+                }
 
                 <div class="col-md-6">
                     <label class="form-label">Condition logic</label>
@@ -108,7 +127,7 @@ else
 
                 <div class="col-md-6 d-flex align-items-end">
                     <div class="form-check mb-2">
-                        <input class="form-check-input" type="checkbox" @bind="autoAdd" id="autoAddRule" />
+                        <input class="form-check-input" type="checkbox" @bind="autoAdd" id="autoAddRule" disabled="@isSplitRule" />
                         <label class="form-check-label" for="autoAddRule">Auto-add matching transactions</label>
                     </div>
                 </div>
@@ -157,10 +176,84 @@ else
                 </div>
             }
 
-            @if (conditions.Any(x => x.Field == RuleMatchField.Amount))
+            @if (isSplitRule)
+            {
+                <hr />
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <div>
+                        <h6 class="mb-0">Split allocations</h6>
+                        <div class="small text-muted">Use percentage lines totaling 100%, or fixed amounts with exactly one remainder line.</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="AddSplitLine">Add Split Line</button>
+                </div>
+
+                <div class="row g-2 mb-3">
+                    <div class="col-md-4">
+                        <label class="form-label">Split method</label>
+                        <select class="form-select" value="@splitType" @onchange="SplitTypeChanged">
+                            <option value="@QuickBooksSplitType.Percentage">Percentage</option>
+                            <option value="@QuickBooksSplitType.Amount">Amount + remainder</option>
+                        </select>
+                    </div>
+                </div>
+
+                @for (var i = 0; i < splitLines.Count; i++)
+                {
+                    var splitIndex = i;
+                    var line = splitLines[splitIndex];
+
+                    <div class="row g-2 mb-2 align-items-end">
+                        <div class="col-md-5">
+                            <label class="form-label">Category</label>
+                            <select class="form-select" @bind="line.CategoryName">
+                                <option value="">-- Select category --</option>
+                                @foreach (var categoryName in SplitCategoryOptions(line))
+                                {
+                                    <option value="@categoryName">@categoryName</option>
+                                }
+                            </select>
+                        </div>
+
+                        @if (splitType == QuickBooksSplitType.Percentage)
+                        {
+                            <div class="col-md-4">
+                                <label class="form-label">Percentage</label>
+                                <div class="input-group">
+                                    <input class="form-control" @bind="line.Value" />
+                                    <span class="input-group-text">%</span>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="col-md-4">
+                                <label class="form-label">Amount</label>
+                                <input class="form-control" @bind="line.Value" disabled="@line.IsRemainder" />
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           checked="@line.IsRemainder"
+                                           @onchange="e => SplitRemainderChanged(splitIndex, e)" />
+                                    <label class="form-check-label">Remainder</label>
+                                </div>
+                            </div>
+                        }
+
+                        <div class="col-md-1">
+                            <button class="btn btn-outline-danger w-100"
+                                    @onclick="() => RemoveSplitLine(splitIndex)"
+                                    disabled="@(splitLines.Count <= 2)">×</button>
+                        </div>
+                    </div>
+                }
+            }
+
+            @if (conditions.Any(x => x.Field == RuleMatchField.Amount) && direction == RuleDirection.MoneyIn)
             {
                 <div class="alert alert-warning mt-3 mb-0">
-                    Amount conditions can be stored in the rule library, but QuickBooks export mapping for Amount is not yet confirmed.
+                    QuickBooks Money in Amount export has not yet been verified. Money out Amount mappings are verified.
                 </div>
             }
 
@@ -196,6 +289,9 @@ else
     private string newCategoryName = string.Empty;
     private bool showCreateAnotherPrompt;
     private bool loadedReadOnlyImport;
+    private bool isSplitRule;
+    private QuickBooksSplitType splitType = QuickBooksSplitType.Percentage;
+    private readonly List<QuickBooksSplitLine> splitLines = new();
 
     private IReadOnlyList<RuleTransactionType> AllowedTransactionTypes =>
         MasterRulePolicy.GetAllowedTransactionTypes(direction);
@@ -242,7 +338,21 @@ else
         payee = rule.Payee ?? string.Empty;
         conditionLogic = rule.MatchAllConditions ? "all" : "any";
         autoAdd = rule.AutoAdd;
-        loadedReadOnlyImport = rule.IsReadOnlyImport;
+
+        splitLines.Clear();
+        isSplitRule = QuickBooksSplitRuleCodec.TryParse(rule.OriginalOutputsJson, out var splitDefinition);
+        if (isSplitRule && splitDefinition is not null)
+        {
+            splitType = splitDefinition.Type;
+            splitLines.AddRange(splitDefinition.Lines.Select(x => new QuickBooksSplitLine
+            {
+                CategoryName = x.CategoryName,
+                Value = x.Value,
+                IsRemainder = x.IsRemainder
+            }));
+        }
+
+        loadedReadOnlyImport = rule.IsReadOnlyImport && !isSplitRule;
 
         conditions.Clear();
         conditions.AddRange(rule.Conditions.Select(x => new RuleCondition
@@ -277,6 +387,9 @@ else
         isError = false;
         showCreateAnotherPrompt = false;
         loadedReadOnlyImport = false;
+        isSplitRule = false;
+        splitType = QuickBooksSplitType.Percentage;
+        splitLines.Clear();
 
         conditions.Clear();
         conditions.Add(NewCondition());
@@ -355,6 +468,101 @@ else
             conditions.RemoveAt(index);
     }
 
+    private void SplitRuleChanged(ChangeEventArgs e)
+    {
+        isSplitRule = e.Value is bool value && value;
+
+        if (isSplitRule)
+        {
+            direction = RuleDirection.MoneyOut;
+            transactionType = RuleTransactionType.Expense;
+            categoryId = string.Empty;
+            payee = string.Empty;
+            autoAdd = false;
+
+            if (splitLines.Count < 2)
+            {
+                splitLines.Clear();
+                splitLines.Add(new QuickBooksSplitLine());
+                splitLines.Add(new QuickBooksSplitLine());
+            }
+        }
+    }
+
+    private void SplitTypeChanged(ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<QuickBooksSplitType>(e.Value?.ToString(), out var parsed))
+            return;
+
+        splitType = parsed;
+
+        foreach (var line in splitLines)
+        {
+            line.IsRemainder = false;
+            if (splitType == QuickBooksSplitType.Percentage && string.IsNullOrWhiteSpace(line.Value))
+                line.Value = string.Empty;
+        }
+
+        if (splitType == QuickBooksSplitType.Amount && splitLines.Count > 0)
+        {
+            splitLines[^1].IsRemainder = true;
+            splitLines[^1].Value = string.Empty;
+        }
+    }
+
+    private void AddSplitLine() => splitLines.Add(new QuickBooksSplitLine());
+
+    private void RemoveSplitLine(int index)
+    {
+        if (splitLines.Count > 2 && index >= 0 && index < splitLines.Count)
+            splitLines.RemoveAt(index);
+    }
+
+    private void SplitRemainderChanged(int index, ChangeEventArgs e)
+    {
+        if (index < 0 || index >= splitLines.Count)
+            return;
+
+        var isRemainder = e.Value is bool value && value;
+
+        if (isRemainder)
+        {
+            foreach (var line in splitLines)
+                line.IsRemainder = false;
+
+            splitLines[index].IsRemainder = true;
+            splitLines[index].Value = string.Empty;
+        }
+        else
+        {
+            splitLines[index].IsRemainder = false;
+        }
+    }
+
+    private IEnumerable<string> SplitCategoryOptions(QuickBooksSplitLine line)
+    {
+        var names = categories
+            .Where(x => x.IsActive)
+            .Select(x => x.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(line.CategoryName))
+            names.Add(line.CategoryName);
+
+        return names.OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private QuickBooksSplitDefinition BuildSplitDefinition() => new()
+    {
+        Type = splitType,
+        Lines = splitLines.Select(x => new QuickBooksSplitLine
+        {
+            CategoryName = x.CategoryName.Trim(),
+            Value = x.Value.Trim(),
+            IsRemainder = x.IsRemainder
+        }).ToList()
+    };
+
     private void DirectionChanged(ChangeEventArgs e)
     {
         if (Enum.TryParse<RuleDirection>(e.Value?.ToString(), out var parsed))
@@ -405,10 +613,29 @@ else
             return;
         }
 
+        QuickBooksSplitDefinition? splitDefinition = null;
+
+        if (isSplitRule)
+        {
+            if (direction != RuleDirection.MoneyOut || transactionType != RuleTransactionType.Expense)
+            {
+                SetError("Split rules are currently verified only for Money out / Expense.");
+                return;
+            }
+
+            splitDefinition = BuildSplitDefinition();
+            var splitError = QuickBooksSplitRuleCodec.Validate(splitDefinition);
+            if (splitError is not null)
+            {
+                SetError(splitError);
+                return;
+            }
+        }
+
         Guid? selectedCategoryId = null;
         string? selectedCategoryName = null;
 
-        if (!string.IsNullOrWhiteSpace(categoryId))
+        if (!isSplitRule && !string.IsNullOrWhiteSpace(categoryId))
         {
             if (!Guid.TryParse(categoryId, out var parsedCategoryId))
             {
@@ -441,13 +668,16 @@ else
         entity.Name = name;
         entity.Direction = direction;
         entity.TransactionType = transactionType;
-        entity.CategoryId = selectedCategoryId;
-        entity.CategoryName = selectedCategoryName;
-        entity.Payee = NullIfWhiteSpace(payee);
+        entity.CategoryId = isSplitRule ? null : selectedCategoryId;
+        entity.CategoryName = isSplitRule ? null : selectedCategoryName;
+        entity.Payee = isSplitRule ? null : NullIfWhiteSpace(payee);
         entity.MatchAllConditions = conditionLogic == "all";
-        entity.AutoAdd = autoAdd;
+        entity.AutoAdd = isSplitRule ? false : autoAdd;
         entity.IsAccountSpecific = false;
         entity.IsReadOnlyImport = false;
+        entity.OriginalOutputsJson = isSplitRule && splitDefinition is not null
+            ? QuickBooksSplitRuleCodec.Serialize(splitDefinition)
+            : null;
         entity.Conditions = conditions.Select(x => new RuleCondition
         {
             Field = x.Field,
