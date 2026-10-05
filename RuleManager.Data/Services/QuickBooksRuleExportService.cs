@@ -276,6 +276,7 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             RuleMatchField.Description when condition.Operator == RuleMatchOperator.Contains => 1,
             RuleMatchField.BankText when condition.Operator == RuleMatchOperator.Contains => 6,
             RuleMatchField.BankText when condition.Operator == RuleMatchOperator.DoesNotContain => 8,
+            RuleMatchField.BankText when condition.Operator == RuleMatchOperator.Equals => 13,
             RuleMatchField.Amount when condition.Operator == RuleMatchOperator.Equals => 2,
             RuleMatchField.Amount when condition.Operator == RuleMatchOperator.DoesNotEqual => 7,
             RuleMatchField.Amount when condition.Operator == RuleMatchOperator.GreaterThan => 3,
