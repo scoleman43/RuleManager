@@ -86,29 +86,16 @@ else
                 {
                     <div class="col-md-6">
                         <label class="form-label">Category</label>
-                        <div class="input-group">
-                            <select class="form-select" @bind="categoryId">
-                                <option value="">-- Select category --</option>
-                                @foreach (var category in categories.Where(x => x.IsActive))
-                                {
-                                    <option value="@category.Id">@category.Name</option>
-                                }
-                            </select>
-                            <button class="btn btn-outline-secondary" type="button" @onclick="ToggleCategoryCreator">
-                                @(showCategoryCreator ? "Cancel" : "New Category")
-                            </button>
+                        <select class="form-select" @bind="categoryId">
+                            <option value="">-- Select category --</option>
+                            @foreach (var category in categories.Where(x => x.IsActive))
+                            {
+                                <option value="@category.Id">@category.Name</option>
+                            }
+                        </select>
+                        <div class="form-text">
+                            Categories come from QuickBooks rule imports. Create new categories in QuickBooks first, then import rules that use them into RuleManager.
                         </div>
-
-                        @if (showCategoryCreator)
-                        {
-                            <div class="mt-2">
-                                <div class="input-group">
-                                    <input class="form-control" @bind="newCategoryName" placeholder="Example: Auto:Insurance" />
-                                    <button class="btn btn-outline-primary" type="button" @onclick="CreateCategoryAsync">Create & Select</button>
-                                </div>
-                                <div class="form-text">Use a colon to separate main and subcategory names.</div>
-                            </div>
-                        }
                     </div>
 
                     <div class="col-md-6">
@@ -285,8 +272,6 @@ else
     private bool autoAdd;
     private bool isError;
     private string? message;
-    private bool showCategoryCreator;
-    private string newCategoryName = string.Empty;
     private bool showCreateAnotherPrompt;
     private bool loadedReadOnlyImport;
     private bool isSplitRule;
@@ -365,8 +350,6 @@ else
         if (conditions.Count == 0)
             conditions.Add(NewCondition());
 
-        showCategoryCreator = false;
-        newCategoryName = string.Empty;
         message = null;
         isError = false;
         showCreateAnotherPrompt = false;
@@ -381,8 +364,6 @@ else
         payee = string.Empty;
         conditionLogic = "all";
         autoAdd = false;
-        showCategoryCreator = false;
-        newCategoryName = string.Empty;
         message = null;
         isError = false;
         showCreateAnotherPrompt = false;
@@ -402,63 +383,6 @@ else
     }
 
     private void ReturnToRules() => Navigation.NavigateTo("/rules");
-
-    private void ToggleCategoryCreator()
-    {
-        showCategoryCreator = !showCategoryCreator;
-        if (!showCategoryCreator)
-            newCategoryName = string.Empty;
-    }
-
-    private async Task CreateCategoryAsync()
-    {
-        string normalized;
-        try
-        {
-            normalized = CategoryName.Normalize(newCategoryName);
-        }
-        catch (ArgumentException ex)
-        {
-            SetError(ex.Message);
-            return;
-        }
-
-        await using var db = await DbFactory.CreateDbContextAsync();
-
-        var existing = await db.Categories.FirstOrDefaultAsync(x =>
-            x.OrganizationId == organizationId &&
-            x.Name.ToLower() == normalized.ToLower());
-
-        if (existing is not null)
-        {
-            if (!existing.IsActive)
-            {
-                existing.IsActive = true;
-                existing.ModifiedUtc = DateTime.UtcNow;
-                await db.SaveChangesAsync();
-            }
-
-            categoryId = existing.Id.ToString();
-        }
-        else
-        {
-            var category = new Category
-            {
-                OrganizationId = organizationId,
-                Name = normalized
-            };
-
-            db.Categories.Add(category);
-            await db.SaveChangesAsync();
-            categoryId = category.Id.ToString();
-        }
-
-        await LoadCategoriesAsync();
-        showCategoryCreator = false;
-        newCategoryName = string.Empty;
-        isError = false;
-        message = $"Category '{normalized}' is ready and selected.";
-    }
 
     private void AddCondition() => conditions.Add(NewCondition());
 
