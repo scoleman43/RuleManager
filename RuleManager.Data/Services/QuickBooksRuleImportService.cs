@@ -447,6 +447,10 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                             AddCondition(conditions, RuleMatchField.BankText, RuleMatchOperator.DoesNotContain, value);
                             break;
 
+                        case 13:
+                            AddCondition(conditions, RuleMatchField.BankText, RuleMatchOperator.Equals, value);
+                            break;
+
                         case 2:
                             AddCondition(conditions, RuleMatchField.Amount, RuleMatchOperator.Equals, NormalizeAmount(value));
                             break;
