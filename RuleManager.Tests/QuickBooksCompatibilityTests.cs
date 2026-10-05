@@ -220,6 +220,32 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Import_ParsesFourAndFiveConditionRulesWithoutTruncation()
+    {
+        var organizationId = Guid.NewGuid();
+        var factory = CreateFactory(nameof(Import_ParsesFourAndFiveConditionRulesWithoutTruncation));
+        await SeedOrganizationAsync(factory, organizationId);
+
+        const string outputs = "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Testing\"}]}";
+
+        using var workbook = BuildWorkbook(
+            ("Four conditions",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"FOUR_A\"},{\"ruleType\":8,\"value\":\"FOUR_B\"},{\"ruleType\":3,\"value\":\"-10.00\"},{\"ruleType\":4,\"value\":\"-999.00\"}],\"isAndRule\":true}",
+                outputs),
+            ("Five conditions",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"FIVE_A\"},{\"ruleType\":8,\"value\":\"FIVE_B\"},{\"ruleType\":3,\"value\":\"-10.00\"},{\"ruleType\":8,\"value\":\"FIVE_D\"},{\"ruleType\":4,\"value\":\"-999.00\"}],\"isAndRule\":true}",
+                outputs));
+
+        var service = new QuickBooksRuleImportService(factory);
+        var items = await service.AnalyzeAsync(organizationId, workbook);
+
+        Assert.Equal(2, items.Count);
+        Assert.Equal(4, items[0].Conditions.Count);
+        Assert.Equal(5, items[1].Conditions.Count);
+        Assert.All(items, item => Assert.Equal(RuleImportStatus.New, item.Status));
+    }
+
+    [Fact]
     public async Task Export_WritesRulesInClientPriorityOrder()
     {
         var factory = CreateFactory(nameof(Export_WritesRulesInClientPriorityOrder));
