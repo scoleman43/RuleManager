@@ -195,6 +195,7 @@ else
     private bool showCategoryCreator;
     private string newCategoryName = string.Empty;
     private bool showCreateAnotherPrompt;
+    private bool loadedReadOnlyImport;
 
     private IReadOnlyList<RuleTransactionType> AllowedTransactionTypes =>
         MasterRulePolicy.GetAllowedTransactionTypes(direction);
@@ -241,6 +242,7 @@ else
         payee = rule.Payee ?? string.Empty;
         conditionLogic = rule.MatchAllConditions ? "all" : "any";
         autoAdd = rule.AutoAdd;
+        loadedReadOnlyImport = rule.IsReadOnlyImport;
 
         conditions.Clear();
         conditions.AddRange(rule.Conditions.Select(x => new RuleCondition
@@ -274,6 +276,7 @@ else
         message = null;
         isError = false;
         showCreateAnotherPrompt = false;
+        loadedReadOnlyImport = false;
 
         conditions.Clear();
         conditions.Add(NewCondition());
@@ -376,6 +379,12 @@ else
 
     private async Task SaveAsync()
     {
+        if (loadedReadOnlyImport)
+        {
+            SetError("This imported QuickBooks rule is preserved exactly for export and cannot be edited yet.");
+            return;
+        }
+
         var name = ruleName.Trim();
 
         if (string.IsNullOrWhiteSpace(name))
