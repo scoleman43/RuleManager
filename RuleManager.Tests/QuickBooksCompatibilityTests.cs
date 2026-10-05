@@ -477,6 +477,79 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Export_ClientSpecificCloneWithSameName_ShadowsReusableRule()
+    {
+        var factory = CreateFactory(nameof(Export_ClientSpecificCloneWithSameName_ShadowsReusableRule));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var reusable = new MasterRule
+            {
+                OrganizationId = organizationId,
+                Name = "Amazon Software",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.Expense,
+                CategoryName = "Amazon:Software",
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.BankText,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "AMAZON"
+                    }
+                }
+            };
+
+            db.MasterRules.Add(reusable);
+            db.ClientRuleAssignments.Add(new ClientRuleAssignment
+            {
+                ClientId = clientId,
+                MasterRuleId = reusable.Id,
+                IsExplicit = true,
+                ExportPriority = 5
+            });
+
+            db.ClientRules.Add(new ClientRule
+            {
+                ClientId = clientId,
+                SourceMasterRuleId = reusable.Id,
+                Name = "Amazon Software",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.Expense,
+                CategoryName = "Parts",
+                ExportPriority = 5,
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.BankText,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "AMAZON"
+                    }
+                }
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        var service = new QuickBooksRuleExportService(factory);
+        var result = await service.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        Assert.Equal(1, result.RuleCount);
+
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Equal("Amazon Software", row.GetCell(0).StringCellValue);
+        Assert.Contains("\"value\":\"Parts\"", row.GetCell(2).StringCellValue);
+        Assert.DoesNotContain("Amazon:Software", row.GetCell(2).StringCellValue);
+    }
+
+    [Fact]
     public async Task Export_WritesRulesInClientPriorityOrder()
     {
         var factory = CreateFactory(nameof(Export_WritesRulesInClientPriorityOrder));
