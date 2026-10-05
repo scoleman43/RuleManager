@@ -9,16 +9,42 @@
 
 <PageTitle>Categories</PageTitle>
 
-<div class="mb-3">
-    <h1>Categories</h1>
-    <p class="text-muted mb-0">QuickBooks categories discovered from imported bank rules.</p>
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h1>Categories</h1>
+        <p class="text-muted mb-0">QuickBooks categories discovered from imported bank rules, plus explicit local overrides.</p>
+    </div>
+    <button class="btn btn-outline-primary" @onclick="ToggleOverride">Add Category Override</button>
 </div>
 
 <div class="alert alert-info">
-    Categories are managed in <strong>QuickBooks Online</strong>, not RuleManager.
-    Create or rename a category in QuickBooks first, then import a bank-rule file that uses that category.
-    RuleManager will add the category to this list automatically.
+    <strong>Recommended:</strong> create or rename categories in QuickBooks first, then import a bank-rule file that uses them.
+    That lets RuleManager learn the exact QBO category name automatically.
 </div>
+
+@if (showOverride)
+{
+    <div class="alert alert-warning">
+        <strong>Category override:</strong> this does not create a category in QuickBooks.
+        The category must already exist in QBO and the name must match exactly.
+        QuickBooks may require manual mapping during rule import, so double-check the resulting rule after import.
+        <div class="row g-2 mt-2 align-items-end">
+            <div class="col-md-8">
+                <label class="form-label">Exact QuickBooks category name</label>
+                <input class="form-control" @bind="overrideCategoryName" placeholder="Example: Auto:Insurance" />
+            </div>
+            <div class="col-md-4 d-flex gap-2">
+                <button class="btn btn-warning" @onclick="AddOverrideAsync">Add Override</button>
+                <button class="btn btn-outline-secondary" @onclick="ToggleOverride">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <div class="alert @(isError ? "alert-danger" : "alert-success")">@message</div>
+}
 
 <div class="card">
     <div class="card-body p-0">
@@ -68,6 +94,10 @@
 @code {
     private readonly List<Category> categories = new();
     private Guid organizationId;
+    private bool showOverride;
+    private string overrideCategoryName = string.Empty;
+    private string? message;
+    private bool isError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -85,6 +115,57 @@
             .ThenBy(x => x.Name)
             .AsNoTracking()
             .ToListAsync());
+    }
+
+    private void ToggleOverride()
+    {
+        showOverride = !showOverride;
+        overrideCategoryName = string.Empty;
+        message = null;
+        isError = false;
+    }
+
+    private async Task AddOverrideAsync()
+    {
+        string normalized;
+        try
+        {
+            normalized = CategoryName.Normalize(overrideCategoryName);
+        }
+        catch (ArgumentException ex)
+        {
+            isError = true;
+            message = ex.Message;
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var existing = await db.Categories.FirstOrDefaultAsync(x =>
+            x.OrganizationId == organizationId &&
+            x.Name.ToLower() == normalized.ToLower());
+
+        if (existing is null)
+        {
+            db.Categories.Add(new Category
+            {
+                OrganizationId = organizationId,
+                Name = normalized
+            });
+        }
+        else
+        {
+            existing.IsActive = true;
+            existing.ModifiedUtc = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+        await LoadAsync();
+
+        showOverride = false;
+        overrideCategoryName = string.Empty;
+        isError = false;
+        message = $"Category override '{normalized}' added. Confirm this exact category already exists in QuickBooks before exporting or importing rules that use it.";
     }
 
     private async Task ToggleActiveAsync(Category category)
