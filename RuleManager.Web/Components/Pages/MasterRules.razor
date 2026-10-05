@@ -203,7 +203,14 @@
                                 </td>
                                 <td class="text-end">
                                     <div class="d-inline-flex align-items-center justify-content-end gap-2 flex-nowrap rule-actions">
-                                        <button class="btn btn-sm btn-outline-primary" @onclick="() => EditRule(rule.Id)">Edit</button>
+                                        @if (rule.IsReadOnlyImport)
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="This imported QuickBooks rule is preserved exactly and is not editable yet.">Preserved</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => EditRule(rule.Id)">Edit</button>
+                                        }
 
                                         <details class="rule-action-menu">
                                             <summary class="btn btn-sm btn-outline-secondary">
