@@ -336,16 +336,24 @@ else
                                             }
                                         </td>
                                         <td class="text-end">
-                                            @if (direct)
-                                            {
-                                                <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveDirectAssignmentAsync(assignment!.Id)">
-                                                    Remove Direct
-                                                </button>
-                                            }
-                                            else
-                                            {
-                                                <span class="small text-muted">Managed by Rule Set</span>
-                                            }
+                                            <div class="d-flex justify-content-end gap-2 flex-wrap">
+                                                @if (!rule.IsReadOnlyImport || QuickBooksSplitRuleCodec.IsSplitRule(rule.OriginalOutputsJson))
+                                                {
+                                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => CloneForClient(rule.Id)">
+                                                        Clone
+                                                    </button>
+                                                }
+                                                @if (direct)
+                                                {
+                                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => RemoveDirectAssignmentAsync(assignment!.Id)">
+                                                        Remove Direct
+                                                    </button>
+                                                }
+                                                else
+                                                {
+                                                    <span class="small text-muted align-self-center">Managed by Rule Set</span>
+                                                }
+                                            </div>
                                         </td>
                                     </tr>
                                 }
@@ -361,10 +369,10 @@ else
     {
         <div class="card mt-4">
             <div class="card-body">
-                <h5 class="card-title mb-1">Client-Specific Imported Rules (@clientSpecificRules.Count)</h5>
+                <h5 class="card-title mb-1">Client-Specific Rules (@clientSpecificRules.Count)</h5>
                 <div class="text-muted small mb-3">
-                    These rules contain QuickBooks account-specific data and are shown separately from reusable rules.
-                    They still participate in the same QuickBooks export priority sequence shown above.
+                    These rules belong only to this client. They include imported account-specific rules and customized clones of reusable rules.
+                    They participate in the same QuickBooks export priority sequence shown above.
                 </div>
 
                 <div class="table-responsive">
@@ -379,6 +387,7 @@ else
                                 <th>Auto Add</th>
                                 <th>Status</th>
                                 <th class="text-end" style="width: 120px;">Move</th>
+                                <th class="text-end">Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -408,7 +417,11 @@ else
                                             @(rule.AutoAdd ? "Yes" : "No")
                                         </span>
                                     </td>
-                                    <td><span class="badge status-badge-client-specific">Client-specific</span></td>
+                                    <td>
+                                        <span class="badge status-badge-client-specific">
+                                            @(rule.IsAccountSpecific ? "Imported account-specific" : "Client-specific clone")
+                                        </span>
+                                    </td>
                                     <td class="text-end">
                                         @if (exportRow is not null)
                                         {
@@ -422,6 +435,16 @@ else
                                                         disabled="@(exportRow.Priority >= ExportOrderRows.Count)"
                                                         @onclick="() => MoveExportRuleAsync(exportRow, 1)">↓</button>
                                             </div>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        @if (rule.IsReadOnlyImport && !QuickBooksSplitRuleCodec.IsSplitRule(rule.OriginalOutputsJson))
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" disabled title="This imported QuickBooks rule is preserved exactly and is not editable.">Preserved</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => EditClientSpecificRule(rule.Id)">Edit</button>
                                         }
                                     </td>
                                 </tr>
@@ -601,7 +624,7 @@ else
 
         clientSpecificRules.Clear();
         clientSpecificRules.AddRange(await db.ClientRules
-            .Where(x => x.ClientId == ClientId && x.IsAccountSpecific)
+            .Where(x => x.ClientId == ClientId)
             .OrderBy(x => x.ExportPriority)
             .ThenBy(x => x.Name)
             .AsNoTracking()
@@ -719,6 +742,12 @@ else
     }
 
     private void BackToClients() => Navigation.NavigateTo("/clients");
+
+    private void CloneForClient(Guid ruleId) =>
+        Navigation.NavigateTo($"/rules/new?cloneFrom={ruleId}&clientId={ClientId}&scope=client");
+
+    private void EditClientSpecificRule(Guid clientRuleId) =>
+        Navigation.NavigateTo($"/client-rules/{clientRuleId}/edit");
 
     private void ToggleRuleSetsSection() => showRuleSetsSection = !showRuleSetsSection;
 
