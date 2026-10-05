@@ -66,31 +66,15 @@ else
                     </div>
 
                     <div class="col-md-6">
-                        <label class="form-label">Rule Sets</label>
-                        @if (activeRuleSets.Count == 0)
-                        {
-                            <div class="form-control text-muted">No active Rule Sets</div>
-                        }
-                        else
-                        {
-                            <div class="border rounded p-2" style="max-height: 180px; overflow-y: auto;">
-                                @foreach (var set in activeRuleSets)
-                                {
-                                    <div class="form-check">
-                                        <input class="form-check-input"
-                                               type="checkbox"
-                                               checked="@selectedCloneRuleSetIds.Contains(set.Id)"
-                                               @onchange="e => ToggleCloneRuleSet(set.Id, e)" />
-                                        <label class="form-check-label">@set.Name</label>
-                                    </div>
-                                }
-                            </div>
-                        }
+                        <label class="form-label">Rule Set</label>
+                        <select class="form-select" @bind="selectedCloneRuleSetId">
+                            <option value="">-- No Rule Set --</option>
+                            @foreach (var set in activeRuleSets)
+                            {
+                                <option value="@set.Id">@set.Name</option>
+                            }
+                        </select>
                     </div>
-                </div>
-
-                <div class="form-text mt-3">
-                    Client-specific rules are reserved for QuickBooks rules that contain client-bound data and cannot be safely shared.
                 </div>
             </div>
         </div>
@@ -339,7 +323,6 @@ else
     private readonly List<Category> categories = new();
     private readonly List<Client> activeClients = new();
     private readonly List<RuleSet> activeRuleSets = new();
-    private readonly HashSet<Guid> selectedCloneRuleSetIds = new();
     private readonly List<RuleCondition> conditions = new();
 
     private string ruleName = string.Empty;
@@ -357,6 +340,7 @@ else
     private bool loadedReadOnlyImport;
     private bool isSplitRule;
     private string selectedCloneClientId = string.Empty;
+    private string selectedCloneRuleSetId = string.Empty;
     private QuickBooksSplitType splitType = QuickBooksSplitType.Percentage;
     private readonly List<QuickBooksSplitLine> splitLines = new();
 
@@ -518,7 +502,7 @@ else
         loadedReadOnlyImport = false;
         isSplitRule = false;
         selectedCloneClientId = string.Empty;
-        selectedCloneRuleSetIds.Clear();
+        selectedCloneRuleSetId = string.Empty;
         splitType = QuickBooksSplitType.Percentage;
         splitLines.Clear();
 
@@ -538,15 +522,6 @@ else
             Navigation.NavigateTo($"/clients/{CloneClientId.Value}/rules");
         else
             Navigation.NavigateTo("/rules");
-    }
-
-    private void ToggleCloneRuleSet(Guid ruleSetId, ChangeEventArgs e)
-    {
-        var selected = e.Value is bool value && value;
-        if (selected)
-            selectedCloneRuleSetIds.Add(ruleSetId);
-        else
-            selectedCloneRuleSetIds.Remove(ruleSetId);
     }
 
     private void ToggleCategoryOverride()
@@ -845,30 +820,30 @@ else
                 });
             }
 
-            var selectedSetIds = selectedCloneRuleSetIds.ToArray();
-            if (selectedSetIds.Length > 0)
+            if (Guid.TryParse(selectedCloneRuleSetId, out var cloneRuleSetId))
             {
-                var existingSetIds = await db.RuleSets
-                    .Where(x => x.OrganizationId == organizationId
-                        && x.IsActive
-                        && selectedSetIds.Contains(x.Id))
-                    .Select(x => x.Id)
-                    .ToListAsync();
+                var ruleSetExists = await db.RuleSets.AnyAsync(x =>
+                    x.Id == cloneRuleSetId
+                    && x.OrganizationId == organizationId
+                    && x.IsActive);
 
-                foreach (var setId in existingSetIds)
+                if (!ruleSetExists)
                 {
-                    var nextOrder = await db.RuleSetRules
-                        .Where(x => x.RuleSetId == setId)
-                        .Select(x => (int?)x.SortOrder)
-                        .MaxAsync() ?? 0;
-
-                    db.RuleSetRules.Add(new RuleSetRule
-                    {
-                        RuleSetId = setId,
-                        MasterRuleId = masterEntity.Id,
-                        SortOrder = nextOrder + 1
-                    });
+                    SetError("The selected Rule Set is no longer available.");
+                    return;
                 }
+
+                var nextOrder = await db.RuleSetRules
+                    .Where(x => x.RuleSetId == cloneRuleSetId)
+                    .Select(x => (int?)x.SortOrder)
+                    .MaxAsync() ?? 0;
+
+                db.RuleSetRules.Add(new RuleSetRule
+                {
+                    RuleSetId = cloneRuleSetId,
+                    MasterRuleId = masterEntity.Id,
+                    SortOrder = nextOrder + 1
+                });
             }
 
             await db.SaveChangesAsync();
