@@ -87,6 +87,24 @@
     </div>
 </div>
 
+@if (rules.Count > 0)
+{
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <div class="text-muted small">
+            @selectedRuleIds.Count rule(s) selected
+        </div>
+        <div class="d-flex gap-2">
+            @if (selectedRuleIds.Count > 0)
+            {
+                <button class="btn btn-sm btn-outline-secondary" @onclick="ClearSelection">Clear Selection</button>
+                <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelectedRulesAsync">
+                    Delete Selected (@selectedRuleIds.Count)
+                </button>
+            }
+        </div>
+    </div>
+}
+
 @if (batchRule is not null)
 {
     <div class="rule-modal-backdrop" @onclick="CloseBatchAssign">
@@ -163,6 +181,13 @@
                 <table class="table table-hover mb-0 align-middle">
                     <thead>
                         <tr>
+                            <th style="width: 44px;">
+                                <input class="form-check-input"
+                                       type="checkbox"
+                                       aria-label="Select all visible rules"
+                                       checked="@AreAllFilteredSelected"
+                                       @onchange="ToggleSelectAllFiltered" />
+                            </th>
                             <th>Rule</th>
                             <th>Direction</th>
                             <th>Conditions</th>
@@ -176,7 +201,14 @@
                     <tbody>
                         @foreach (var rule in FilteredRules)
                         {
-                            <tr>
+                            <tr @key="rule.Id">
+                                <td>
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           aria-label="@($"Select {rule.Name}")"
+                                           checked="@selectedRuleIds.Contains(rule.Id)"
+                                           @onchange="e => ToggleRuleSelection(rule.Id, e)" />
+                                </td>
                                 <td>
                                     <strong>@rule.Name</strong>
                                     @if (!string.IsNullOrWhiteSpace(rule.Payee))
@@ -250,6 +282,7 @@
     private Guid organizationId;
     private readonly List<MasterRule> rules = new();
     private readonly List<string> categoryNames = new();
+    private readonly HashSet<Guid> selectedRuleIds = new();
 
     private string searchText = string.Empty;
     private string statusFilter = "all";
@@ -271,6 +304,15 @@
         MatchesDirection(rule) &&
         MatchesTransaction(rule) &&
         MatchesCategory(rule));
+
+    private bool AreAllFilteredSelected
+    {
+        get
+        {
+            var visibleIds = FilteredRules.Select(x => x.Id).ToList();
+            return visibleIds.Count > 0 && visibleIds.All(selectedRuleIds.Contains);
+        }
+    }
 
     private IEnumerable<Client> DirectClientOptions =>
         activeClients.Where(client =>
@@ -302,6 +344,8 @@
             .Select(x => x!)
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .OrderBy(x => x));
+
+        selectedRuleIds.RemoveWhere(id => rules.All(x => x.Id != id));
     }
 
     private bool MatchesSearch(MasterRule rule)
@@ -351,12 +395,126 @@
         categoryFilter = "all";
     }
 
+    private void ToggleRuleSelection(Guid ruleId, ChangeEventArgs e)
+    {
+        var selected = e.Value is bool value && value;
+        if (selected)
+            selectedRuleIds.Add(ruleId);
+        else
+            selectedRuleIds.Remove(ruleId);
+    }
+
+    private void ToggleSelectAllFiltered(ChangeEventArgs e)
+    {
+        var selected = e.Value is bool value && value;
+        var visibleIds = FilteredRules.Select(x => x.Id).ToArray();
+
+        if (selected)
+        {
+            foreach (var id in visibleIds)
+                selectedRuleIds.Add(id);
+        }
+        else
+        {
+            foreach (var id in visibleIds)
+                selectedRuleIds.Remove(id);
+        }
+    }
+
+    private void ClearSelection() => selectedRuleIds.Clear();
+
+    private async Task DeleteSelectedRulesAsync()
+    {
+        var ids = selectedRuleIds.ToArray();
+        if (ids.Length == 0)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var selectedRules = await db.MasterRules
+            .Where(x => x.OrganizationId == organizationId && ids.Contains(x.Id))
+            .ToListAsync();
+
+        if (selectedRules.Count == 0)
+        {
+            selectedRuleIds.Clear();
+            message = "The selected rules no longer exist.";
+            isError = true;
+            await LoadAsync();
+            return;
+        }
+
+        var selectedIds = selectedRules.Select(x => x.Id).ToArray();
+
+        var assignments = await db.ClientRuleAssignments
+            .Where(x => selectedIds.Contains(x.MasterRuleId))
+            .ToListAsync();
+
+        var assignmentIds = assignments.Select(x => x.Id).ToArray();
+        var overrides = assignmentIds.Length == 0
+            ? new List<RuleOverride>()
+            : await db.RuleOverrides
+                .Where(x => assignmentIds.Contains(x.ClientRuleAssignmentId))
+                .ToListAsync();
+
+        var ruleSetLinks = await db.RuleSetRules
+            .Where(x => selectedIds.Contains(x.MasterRuleId))
+            .ToListAsync();
+
+        var clientRuleReferences = await db.ClientRules
+            .Where(x => x.SourceMasterRuleId.HasValue
+                && selectedIds.Contains(x.SourceMasterRuleId.Value))
+            .ToListAsync();
+
+        var warningParts = new List<string>();
+        if (assignments.Count > 0)
+            warningParts.Add($"{assignments.Count} client assignment(s)");
+        if (ruleSetLinks.Count > 0)
+            warningParts.Add($"{ruleSetLinks.Count} Rule Set membership(s)");
+        if (clientRuleReferences.Count > 0)
+            warningParts.Add($"{clientRuleReferences.Count} client-specific source reference(s)");
+
+        var dependencyText = warningParts.Count == 0
+            ? string.Empty
+            : $" This will also remove {string.Join(", ", warningParts)}. Client-specific rules themselves will be kept.";
+
+        var confirmed = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Permanently delete {selectedRules.Count} selected rule(s)?{dependencyText} This cannot be undone.");
+
+        if (!confirmed)
+            return;
+
+        if (overrides.Count > 0)
+            db.RuleOverrides.RemoveRange(overrides);
+
+        if (assignments.Count > 0)
+            db.ClientRuleAssignments.RemoveRange(assignments);
+
+        if (ruleSetLinks.Count > 0)
+            db.RuleSetRules.RemoveRange(ruleSetLinks);
+
+        foreach (var clientRule in clientRuleReferences)
+        {
+            clientRule.SourceMasterRuleId = null;
+            clientRule.ModifiedUtc = DateTime.UtcNow;
+        }
+
+        db.MasterRules.RemoveRange(selectedRules);
+        await db.SaveChangesAsync();
+
+        selectedRuleIds.Clear();
+        message = $"{selectedRules.Count} rule(s) deleted.";
+        isError = false;
+        await LoadAsync();
+    }
+
     private void CreateRule() => Navigation.NavigateTo("/rules/new");
 
     private void EditRule(Guid ruleId) => Navigation.NavigateTo($"/rules/{ruleId}/edit");
 
     private void CloneRule(Guid ruleId) =>
-        Navigation.NavigateTo($"/rules/new?cloneFrom={ruleId}&scope=shared");
+        Navigation.NavigateTo($"/rules/new?cloneFrom={ruleId}");
 
     private async Task OpenBatchAssignAsync(MasterRule rule)
     {
