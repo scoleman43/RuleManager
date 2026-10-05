@@ -64,6 +64,28 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Import_ParsesVerifiedBankTextExactMatch()
+    {
+        var organizationId = Guid.NewGuid();
+        var factory = CreateFactory(nameof(Import_ParsesVerifiedBankTextExactMatch));
+        await SeedOrganizationAsync(factory, organizationId);
+
+        const string conditions = "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":13,\"value\":\"BANK_IS_EXACTLY\"}],\"isAndRule\":true}";
+        const string outputs = "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Testing\"}]}";
+
+        using var workbook = BuildWorkbook(("Exact bank text", conditions, outputs));
+        var service = new QuickBooksRuleImportService(factory);
+
+        var item = Assert.Single(await service.AnalyzeAsync(organizationId, workbook));
+        var condition = Assert.Single(item.Conditions);
+
+        Assert.Equal(RuleImportStatus.New, item.Status);
+        Assert.Equal(RuleMatchField.BankText, condition.Field);
+        Assert.Equal(RuleMatchOperator.Equals, condition.Operator);
+        Assert.Equal("BANK_IS_EXACTLY", condition.Value);
+    }
+
+    [Fact]
     public async Task Import_ClassifiesCreditCardPayment_AsClientSpecific()
     {
         var organizationId = Guid.NewGuid();
@@ -275,6 +297,56 @@ public sealed class QuickBooksCompatibilityTests
         Assert.Equal("Card Payment", row.GetCell(0).StringCellValue);
         Assert.Equal(conditions, row.GetCell(1).StringCellValue);
         Assert.Equal(outputs, row.GetCell(2).StringCellValue);
+    }
+
+    [Fact]
+    public async Task Export_GeneratesVerifiedBankTextExactMatchJson()
+    {
+        var factory = CreateFactory(nameof(Export_GeneratesVerifiedBankTextExactMatchJson));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var rule = new MasterRule
+            {
+                OrganizationId = organizationId,
+                Name = "Exact bank text",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.Expense,
+                CategoryName = "Testing",
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.BankText,
+                        Operator = RuleMatchOperator.Equals,
+                        Value = "BANK_IS_EXACTLY"
+                    }
+                }
+            };
+
+            db.MasterRules.Add(rule);
+            db.ClientRuleAssignments.Add(new ClientRuleAssignment
+            {
+                ClientId = clientId,
+                MasterRuleId = rule.Id,
+                IsExplicit = true,
+                ExportPriority = 1
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new QuickBooksRuleExportService(factory);
+        var result = await service.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Equal(
+            "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":13,\"value\":\"BANK_IS_EXACTLY\"}],\"isAndRule\":true}",
+            row.GetCell(1).StringCellValue);
     }
 
     [Fact]
