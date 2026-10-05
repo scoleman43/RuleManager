@@ -178,10 +178,10 @@ else
                 <div>
                     <h5 class="card-title mb-1">Reusable Assigned Rules (@AssignedRules.Count())</h5>
                     <div class="text-muted small">
-                        Reusable rules are shown here in QuickBooks export priority order.
+                        Effective reusable rules are shown here in QuickBooks export priority order.
                         @if (clientSpecificRules.Count > 0)
                         {
-                            <span> Client-specific rules are shown separately below but share the same priority sequence, so a priority number may appear to be skipped in this table.</span>
+                            <span> Client-specific rules are shown separately below and share the same priority sequence. A client-specific clone with the same name replaces the reusable rule for this client's export.</span>
                         }
                     </div>
                 </div>
@@ -492,10 +492,20 @@ else
     private IEnumerable<RuleSet> AvailableRuleSetOptions =>
         ruleSets.Where(set => !assignedRuleSetIds.Contains(set.Id));
 
-    private IEnumerable<MasterRule> AssignedRules =>
-        masterRules.Where(rule =>
-            expectedFromRuleSets.Contains(rule.Id)
-            || AssignmentFor(rule.Id)?.IsExplicit == true);
+    private IEnumerable<MasterRule> AssignedRules
+    {
+        get
+        {
+            var clientSpecificNames = clientSpecificRules
+                .Select(x => x.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return masterRules.Where(rule =>
+                !clientSpecificNames.Contains(rule.Name)
+                && (expectedFromRuleSets.Contains(rule.Id)
+                    || AssignmentFor(rule.Id)?.IsExplicit == true));
+        }
+    }
 
     private IEnumerable<MasterRule> FilteredAssignedRules =>
         AssignedRules.Where(rule =>
