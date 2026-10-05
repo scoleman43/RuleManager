@@ -37,6 +37,7 @@ public sealed class RuleImportPreviewItem
     public string? OriginalOutputsJson { get; init; }
     public bool IsAccountSpecific { get; init; }
     public bool IsReadOnlyImport { get; init; }
+    public bool IsSplitRule { get; init; }
     public string? UnsupportedReason { get; init; }
     public RuleImportStatus Status { get; set; }
     public Guid? ExistingRuleId { get; set; }
@@ -484,6 +485,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
         string? categoryName = null;
         string? payee = null;
         var autoAdd = false;
+        var hasSplitOutput = false;
         int? transactionCode = null;
 
         if (!TryParseJson(outputsJson, out var outputsDoc, out var outputsError))
@@ -507,6 +509,12 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
 
                         case 5:
                             payee = GetValueAsString(obj, "value");
+                            break;
+
+                        case 6:
+                            // Verified QBO split output. Preserve the original output JSON exactly
+                            // until split editing is modeled in the RuleManager UI.
+                            hasSplitOutput = true;
                             break;
 
                         case 7:
@@ -546,7 +554,8 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             OriginalConditionsJson = NullIfWhiteSpace(conditionsJson),
             OriginalOutputsJson = NullIfWhiteSpace(outputsJson),
             IsAccountSpecific = isAccountSpecific,
-            IsReadOnlyImport = isAccountSpecific || reasons.Count > 0,
+            IsReadOnlyImport = isAccountSpecific || hasSplitOutput || reasons.Count > 0,
+            IsSplitRule = hasSplitOutput,
             UnsupportedReason = reasons.Count == 0 ? null : string.Join(" ", reasons.Distinct()),
             Status = reasons.Count == 0 ? RuleImportStatus.New : RuleImportStatus.Unsupported
         };
