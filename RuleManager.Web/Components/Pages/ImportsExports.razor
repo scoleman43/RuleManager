@@ -331,6 +331,10 @@
                                     {
                                         <span class="small text-muted">The import file contains this rule name more than once.</span>
                                     }
+                                    else if (item.IsSplitRule)
+                                    {
+                                        <span class="small text-muted">Split rule. RuleManager will preserve the verified QuickBooks split output exactly for export. Split editing is not enabled yet.</span>
+                                    }
                                     else if (item.Status == RuleImportStatus.ClientSpecific)
                                     {
                                         <span class="small text-muted">Account-specific rule. It will be stored only for the selected client and exported using its preserved QuickBooks data.</span>
@@ -367,6 +371,13 @@
                     <div class="text-muted">Choose the client whose effective assigned rules should be exported.</div>
                 </div>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="CloseExport">Close</button>
+            </div>
+
+            <div class="alert alert-warning mb-3">
+                <strong>QuickBooks import priority:</strong>
+                QuickBooks appends newly imported rules after existing rules.
+                To preserve the complete RuleManager priority order, remove the existing QBO rules before importing a full export.
+                For incremental imports, review and manually reposition newly imported rules in QuickBooks after import.
             </div>
 
             <div class="row g-3 align-items-end">
