@@ -87,6 +87,117 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Import_ParsesVerifiedBankTextAmountAndPayeeMappings()
+    {
+        var organizationId = Guid.NewGuid();
+        var factory = CreateFactory(nameof(Import_ParsesVerifiedBankTextAmountAndPayeeMappings));
+        await SeedOrganizationAsync(factory, organizationId);
+
+        using var workbook = BuildWorkbook(
+            ("Does not contain",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":8,\"value\":\"BLOCK\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Testing\"}]}"),
+            ("Amount equals",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":2,\"value\":\"-100.00\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Testing\"}]}"),
+            ("Amount not equal",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":7,\"value\":\"-101.00\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Testing\"}]}"),
+            ("Amount greater",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":3,\"value\":\"-102.00\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Testing\"}]}"),
+            ("Amount less",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":4,\"value\":\"-103.00\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Testing\"}]}"),
+            ("Payee",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"PAYEE\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Office Supplies\"},{\"actionType\":5,\"value\":\"TEST Vendor\"}]}"));
+
+        var service = new QuickBooksRuleImportService(factory);
+        var items = await service.AnalyzeAsync(organizationId, workbook);
+
+        Assert.All(items, item => Assert.Equal(RuleImportStatus.New, item.Status));
+
+        Assert.Equal(RuleMatchOperator.DoesNotContain, items[0].Conditions.Single().Operator);
+
+        Assert.Equal(RuleMatchOperator.Equals, items[1].Conditions.Single().Operator);
+        Assert.Equal("100.00", items[1].Conditions.Single().Value);
+
+        Assert.Equal(RuleMatchOperator.DoesNotEqual, items[2].Conditions.Single().Operator);
+        Assert.Equal("101.00", items[2].Conditions.Single().Value);
+
+        Assert.Equal(RuleMatchOperator.GreaterThan, items[3].Conditions.Single().Operator);
+        Assert.Equal("102.00", items[3].Conditions.Single().Value);
+
+        Assert.Equal(RuleMatchOperator.LessThan, items[4].Conditions.Single().Operator);
+        Assert.Equal("103.00", items[4].Conditions.Single().Value);
+
+        Assert.Equal("TEST Vendor", items[5].Payee);
+    }
+
+    [Fact]
+    public async Task Export_GeneratesVerifiedBankTextAmountAndPayeeJson()
+    {
+        var factory = CreateFactory(nameof(Export_GeneratesVerifiedBankTextAmountAndPayeeJson));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var rule = new MasterRule
+            {
+                OrganizationId = organizationId,
+                Name = "Verified mappings",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.Expense,
+                CategoryName = "Office Supplies",
+                Payee = "TEST Vendor",
+                MatchAllConditions = true,
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.BankText,
+                        Operator = RuleMatchOperator.DoesNotContain,
+                        Value = "BLOCK"
+                    },
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.Amount,
+                        Operator = RuleMatchOperator.GreaterThan,
+                        Value = "102"
+                    }
+                }
+            };
+
+            db.MasterRules.Add(rule);
+            db.ClientRuleAssignments.Add(new ClientRuleAssignment
+            {
+                ClientId = clientId,
+                MasterRuleId = rule.Id,
+                IsExplicit = true,
+                ExportPriority = 1
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new QuickBooksRuleExportService(factory);
+        var result = await service.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Equal(
+            "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":8,\"value\":\"BLOCK\"},{\"ruleType\":3,\"value\":\"-102.00\"}],\"isAndRule\":true}",
+            row.GetCell(1).StringCellValue);
+
+        Assert.Equal(
+            "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Office Supplies\"},{\"actionType\":5,\"value\":\"TEST Vendor\"}]}",
+            row.GetCell(2).StringCellValue);
+    }
+
+    [Fact]
     public async Task Export_WritesRulesInClientPriorityOrder()
     {
         var factory = CreateFactory(nameof(Export_WritesRulesInClientPriorityOrder));
