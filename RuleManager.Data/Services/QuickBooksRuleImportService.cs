@@ -118,7 +118,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
 
             item.ExistingRuleId = existing.Id;
 
-            if (Equivalent(existing, item))
+            if (existing.IsActive && Equivalent(existing, item))
             {
                 item.Status = RuleImportStatus.Unchanged;
                 item.Selected = false;
