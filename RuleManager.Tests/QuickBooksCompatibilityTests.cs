@@ -86,6 +86,54 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Import_MarksMatchingInactiveReusableRule_AsChangedSoItCanBeReactivated()
+    {
+        var organizationId = Guid.NewGuid();
+        var factory = CreateFactory(nameof(Import_MarksMatchingInactiveReusableRule_AsChangedSoItCanBeReactivated));
+        await SeedOrganizationAsync(factory, organizationId);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.MasterRules.Add(new MasterRule
+            {
+                OrganizationId = organizationId,
+                Name = "(Suggested) Shell as Auto-gas- tolls",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.Expense,
+                CategoryName = "Auto:gas/ tolls",
+                IsActive = false,
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.Description,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "Shell"
+                    }
+                }
+            });
+            await db.SaveChangesAsync();
+        }
+
+        const string conditions = "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":1,\"value\":\"Shell\"}],\"isAndRule\":true}";
+        const string outputs = "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Auto:gas/ tolls\"}]}";
+
+        using var workbook = BuildWorkbook(("(Suggested) Shell as Auto-gas- tolls", conditions, outputs));
+        var service = new QuickBooksRuleImportService(factory);
+
+        var item = Assert.Single(await service.AnalyzeAsync(organizationId, workbook));
+
+        Assert.Equal(RuleImportStatus.Changed, item.Status);
+        Assert.True(item.Selected);
+
+        await service.ApplyAsync(organizationId, new[] { item });
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var rule = await verify.MasterRules.SingleAsync(x => x.Name == "(Suggested) Shell as Auto-gas- tolls");
+        Assert.True(rule.IsActive);
+    }
+
+    [Fact]
     public async Task Import_ClassifiesCreditCardPayment_AsClientSpecific()
     {
         var organizationId = Guid.NewGuid();
