@@ -217,6 +217,12 @@
                                                 Actions <span aria-hidden="true">▾</span>
                                             </summary>
                                             <div class="rule-action-menu-panel">
+                                                @if (!rule.IsReadOnlyImport || QuickBooksSplitRuleCodec.IsSplitRule(rule.OriginalOutputsJson))
+                                                {
+                                                    <button class="rule-action-menu-item" @onclick="() => CloneRule(rule.Id)">
+                                                        Clone Rule
+                                                    </button>
+                                                }
                                                 <button class="rule-action-menu-item" @onclick="() => OpenBatchAssignAsync(rule)">
                                                     Assign Directly
                                                 </button>
@@ -348,6 +354,9 @@
     private void CreateRule() => Navigation.NavigateTo("/rules/new");
 
     private void EditRule(Guid ruleId) => Navigation.NavigateTo($"/rules/{ruleId}/edit");
+
+    private void CloneRule(Guid ruleId) =>
+        Navigation.NavigateTo($"/rules/new?cloneFrom={ruleId}&scope=shared");
 
     private async Task OpenBatchAssignAsync(MasterRule rule)
     {
