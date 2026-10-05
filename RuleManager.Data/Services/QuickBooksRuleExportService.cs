@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using NPOI.HSSF.UserModel;
@@ -170,30 +171,38 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
 
         foreach (var condition in rule.Conditions)
         {
-            if (condition.Operator != RuleMatchOperator.Contains)
+            if (!TryGetConditionRuleType(condition, out var ruleType))
             {
-                error = $"The operator '{FormatOperator(condition.Operator)}' does not yet have a verified QuickBooks export mapping.";
+                error = $"The combination '{condition.Field} / {FormatOperator(condition.Operator)}' does not yet have a verified QuickBooks export mapping.";
                 return null;
             }
 
-            var ruleType = condition.Field switch
+            var value = condition.Value;
+            if (condition.Field == RuleMatchField.Amount)
             {
-                RuleMatchField.Description => 1,
-                RuleMatchField.BankText => 6,
-                RuleMatchField.Amount => (int?)null,
-                _ => null
-            };
+                if (rule.Direction != RuleDirection.MoneyOut)
+                {
+                    error = "Money in Amount export has not yet been verified against a real QuickBooks export.";
+                    return null;
+                }
 
-            if (!ruleType.HasValue)
-            {
-                error = $"The condition field '{condition.Field}' does not yet have a verified QuickBooks export mapping.";
-                return null;
+                if (!decimal.TryParse(
+                    condition.Value,
+                    NumberStyles.Number,
+                    CultureInfo.InvariantCulture,
+                    out var amount))
+                {
+                    error = $"Amount condition '{condition.Value}' is not a valid number.";
+                    return null;
+                }
+
+                value = (-Math.Abs(amount)).ToString("0.00", CultureInfo.InvariantCulture);
             }
 
             conditionObjects.Add(new Dictionary<string, object?>
             {
-                ["ruleType"] = ruleType.Value,
-                ["value"] = condition.Value
+                ["ruleType"] = ruleType,
+                ["value"] = value
             });
         }
 
@@ -231,6 +240,15 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             });
         }
 
+        if (!string.IsNullOrWhiteSpace(rule.Payee))
+        {
+            actionObjects.Add(new Dictionary<string, object?>
+            {
+                ["actionType"] = 5,
+                ["value"] = rule.Payee
+            });
+        }
+
         if (rule.AutoAdd)
         {
             actionObjects.Add(new Dictionary<string, object?>
@@ -249,6 +267,23 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             rule.Name,
             JsonSerializer.Serialize(conditions),
             JsonSerializer.Serialize(outputs));
+    }
+
+    private static bool TryGetConditionRuleType(RuleCondition condition, out int ruleType)
+    {
+        ruleType = condition.Field switch
+        {
+            RuleMatchField.Description when condition.Operator == RuleMatchOperator.Contains => 1,
+            RuleMatchField.BankText when condition.Operator == RuleMatchOperator.Contains => 6,
+            RuleMatchField.BankText when condition.Operator == RuleMatchOperator.DoesNotContain => 8,
+            RuleMatchField.Amount when condition.Operator == RuleMatchOperator.Equals => 2,
+            RuleMatchField.Amount when condition.Operator == RuleMatchOperator.DoesNotEqual => 7,
+            RuleMatchField.Amount when condition.Operator == RuleMatchOperator.GreaterThan => 3,
+            RuleMatchField.Amount when condition.Operator == RuleMatchOperator.LessThan => 4,
+            _ => -1
+        };
+
+        return ruleType >= 0;
     }
 
     private static string? GetTransactionCode(RuleBase rule) => rule.TransactionType switch
