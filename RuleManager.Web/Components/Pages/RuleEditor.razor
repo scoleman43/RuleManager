@@ -86,16 +86,34 @@ else
                 {
                     <div class="col-md-6">
                         <label class="form-label">Category</label>
-                        <select class="form-select" @bind="categoryId">
-                            <option value="">-- Select category --</option>
-                            @foreach (var category in categories.Where(x => x.IsActive))
-                            {
-                                <option value="@category.Id">@category.Name</option>
-                            }
-                        </select>
-                        <div class="form-text">
-                            Categories come from QuickBooks rule imports. Create new categories in QuickBooks first, then import rules that use them into RuleManager.
+                        <div class="input-group">
+                            <select class="form-select" @bind="categoryId">
+                                <option value="">-- Select category --</option>
+                                @foreach (var category in categories.Where(x => x.IsActive))
+                                {
+                                    <option value="@category.Id">@category.Name</option>
+                                }
+                            </select>
+                            <button class="btn btn-outline-secondary" type="button" @onclick="ToggleCategoryOverride">
+                                @(showCategoryOverride ? "Cancel" : "Add Override")
+                            </button>
                         </div>
+                        <div class="form-text">
+                            Recommended: create the category in QuickBooks first and import a rule that uses it so RuleManager learns the exact name.
+                        </div>
+
+                        @if (showCategoryOverride)
+                        {
+                            <div class="alert alert-warning mt-2 mb-0">
+                                <strong>Override only:</strong> RuleManager cannot create categories in QuickBooks.
+                                The category must already exist in QBO and the name must match exactly.
+                                QuickBooks may require manual mapping during import, so verify the imported rule afterward.
+                                <div class="input-group mt-2">
+                                    <input class="form-control" @bind="overrideCategoryName" placeholder="Exact QuickBooks category name" />
+                                    <button class="btn btn-warning" type="button" @onclick="CreateCategoryOverrideAsync">Add Override</button>
+                                </div>
+                            </div>
+                        }
                     </div>
 
                     <div class="col-md-6">
@@ -273,6 +291,8 @@ else
     private bool isError;
     private string? message;
     private bool showCreateAnotherPrompt;
+    private bool showCategoryOverride;
+    private string overrideCategoryName = string.Empty;
     private bool loadedReadOnlyImport;
     private bool isSplitRule;
     private QuickBooksSplitType splitType = QuickBooksSplitType.Percentage;
@@ -353,6 +373,8 @@ else
         message = null;
         isError = false;
         showCreateAnotherPrompt = false;
+        showCategoryOverride = false;
+        overrideCategoryName = string.Empty;
     }
 
     private void ResetForm()
@@ -367,6 +389,8 @@ else
         message = null;
         isError = false;
         showCreateAnotherPrompt = false;
+        showCategoryOverride = false;
+        overrideCategoryName = string.Empty;
         loadedReadOnlyImport = false;
         isSplitRule = false;
         splitType = QuickBooksSplitType.Percentage;
@@ -383,6 +407,57 @@ else
     }
 
     private void ReturnToRules() => Navigation.NavigateTo("/rules");
+
+    private void ToggleCategoryOverride()
+    {
+        showCategoryOverride = !showCategoryOverride;
+        if (!showCategoryOverride)
+            overrideCategoryName = string.Empty;
+    }
+
+    private async Task CreateCategoryOverrideAsync()
+    {
+        string normalized;
+        try
+        {
+            normalized = CategoryName.Normalize(overrideCategoryName);
+        }
+        catch (ArgumentException ex)
+        {
+            SetError(ex.Message);
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var existing = await db.Categories.FirstOrDefaultAsync(x =>
+            x.OrganizationId == organizationId &&
+            x.Name.ToLower() == normalized.ToLower());
+
+        if (existing is null)
+        {
+            existing = new Category
+            {
+                OrganizationId = organizationId,
+                Name = normalized
+            };
+            db.Categories.Add(existing);
+        }
+        else if (!existing.IsActive)
+        {
+            existing.IsActive = true;
+            existing.ModifiedUtc = DateTime.UtcNow;
+        }
+
+        await db.SaveChangesAsync();
+        await LoadCategoriesAsync();
+
+        categoryId = existing.Id.ToString();
+        showCategoryOverride = false;
+        overrideCategoryName = string.Empty;
+        isError = false;
+        message = $"Category override '{normalized}' added. Confirm this exact category already exists in QuickBooks before importing the exported rule.";
+    }
 
     private void AddCondition() => conditions.Add(NewCondition());
 
