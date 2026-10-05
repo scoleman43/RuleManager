@@ -30,6 +30,7 @@ public sealed class RuleImportPreviewItem
     public RuleTransactionType TransactionType { get; init; }
     public List<RuleCondition> Conditions { get; init; } = new();
     public string? CategoryName { get; init; }
+    public string? Payee { get; init; }
     public bool AutoAdd { get; init; }
     public bool MatchAllConditions { get; init; } = true;
     public string? OriginalConditionsJson { get; init; }
@@ -247,7 +248,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             entity.CategoryId = categories
                 .FirstOrDefault(x => string.Equals(x.Name, item.CategoryName, StringComparison.OrdinalIgnoreCase))
                 ?.Id;
-            entity.Payee = null;
+            entity.Payee = item.Payee;
             entity.MatchAllConditions = item.MatchAllConditions;
             entity.AutoAdd = item.AutoAdd;
             entity.Conditions = item.Conditions.Select(x => new RuleCondition
@@ -306,7 +307,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                 entity.TransactionType = item.TransactionType;
                 entity.CategoryName = item.CategoryName;
                 entity.CategoryId = null;
-                entity.Payee = null;
+                entity.Payee = item.Payee;
                 entity.MatchAllConditions = item.MatchAllConditions;
                 entity.AutoAdd = item.AutoAdd;
                 entity.Conditions = item.Conditions.Select(x => new RuleCondition
@@ -435,27 +436,31 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                             break;
 
                         case 1:
-                            if (!string.IsNullOrWhiteSpace(value))
-                            {
-                                conditions.Add(new RuleCondition
-                                {
-                                    Field = RuleMatchField.Description,
-                                    Operator = RuleMatchOperator.Contains,
-                                    Value = value
-                                });
-                            }
+                            AddCondition(conditions, RuleMatchField.Description, RuleMatchOperator.Contains, value);
                             break;
 
                         case 6:
-                            if (!string.IsNullOrWhiteSpace(value))
-                            {
-                                conditions.Add(new RuleCondition
-                                {
-                                    Field = RuleMatchField.BankText,
-                                    Operator = RuleMatchOperator.Contains,
-                                    Value = value
-                                });
-                            }
+                            AddCondition(conditions, RuleMatchField.BankText, RuleMatchOperator.Contains, value);
+                            break;
+
+                        case 8:
+                            AddCondition(conditions, RuleMatchField.BankText, RuleMatchOperator.DoesNotContain, value);
+                            break;
+
+                        case 2:
+                            AddCondition(conditions, RuleMatchField.Amount, RuleMatchOperator.Equals, NormalizeAmount(value));
+                            break;
+
+                        case 7:
+                            AddCondition(conditions, RuleMatchField.Amount, RuleMatchOperator.DoesNotEqual, NormalizeAmount(value));
+                            break;
+
+                        case 3:
+                            AddCondition(conditions, RuleMatchField.Amount, RuleMatchOperator.GreaterThan, NormalizeAmount(value));
+                            break;
+
+                        case 4:
+                            AddCondition(conditions, RuleMatchField.Amount, RuleMatchOperator.LessThan, NormalizeAmount(value));
                             break;
 
                         default:
@@ -473,6 +478,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             reasons.Add("No supported Description or Bank text condition was found.");
 
         string? categoryName = null;
+        string? payee = null;
         var autoAdd = false;
         int? transactionCode = null;
 
@@ -493,6 +499,10 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                     {
                         case 0:
                             categoryName = GetValueAsString(obj, "value");
+                            break;
+
+                        case 5:
+                            payee = GetValueAsString(obj, "value");
                             break;
 
                         case 7:
@@ -526,6 +536,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             TransactionType = transactionType,
             Conditions = conditions,
             CategoryName = NullIfWhiteSpace(categoryName),
+            Payee = NullIfWhiteSpace(payee),
             AutoAdd = autoAdd,
             MatchAllConditions = matchAllConditions,
             OriginalConditionsJson = NullIfWhiteSpace(conditionsJson),
@@ -573,7 +584,8 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             || existing.TransactionType != imported.TransactionType
             || existing.AutoAdd != imported.AutoAdd
             || existing.MatchAllConditions != imported.MatchAllConditions
-            || !string.Equals(existing.CategoryName ?? string.Empty, imported.CategoryName ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+            || !string.Equals(existing.CategoryName ?? string.Empty, imported.CategoryName ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(existing.Payee ?? string.Empty, imported.Payee ?? string.Empty, StringComparison.OrdinalIgnoreCase))
             return false;
 
         var left = existing.Conditions
@@ -587,6 +599,34 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             .ToArray();
 
         return left.SequenceEqual(right, StringComparer.Ordinal);
+    }
+
+    private static void AddCondition(
+        ICollection<RuleCondition> conditions,
+        RuleMatchField field,
+        RuleMatchOperator op,
+        string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return;
+
+        conditions.Add(new RuleCondition
+        {
+            Field = field,
+            Operator = op,
+            Value = value
+        });
+    }
+
+    private static string? NormalizeAmount(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return value;
+
+        var normalized = value.Trim();
+        return normalized.StartsWith("-", StringComparison.Ordinal)
+            ? normalized[1..]
+            : normalized;
     }
 
     private static string NormalizeCondition(RuleCondition condition) =>
