@@ -268,6 +268,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             entity.IsReadOnlyImport = item.IsReadOnlyImport;
             entity.IsActive = true;
             entity.ModifiedUtc = DateTime.UtcNow;
+            entity.ImportedBaselineJson = RuleManager.Core.Rules.RuleImportSnapshot.Serialize(entity);
         }
 
         if (clientId.HasValue)
@@ -328,6 +329,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                 entity.IsAccountSpecific = true;
                 entity.IsReadOnlyImport = true;
                 entity.ModifiedUtc = DateTime.UtcNow;
+                entity.ImportedBaselineJson = RuleManager.Core.Rules.RuleImportSnapshot.Serialize(entity);
             }
         }
 
