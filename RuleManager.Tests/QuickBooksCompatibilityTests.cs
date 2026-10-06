@@ -317,6 +317,16 @@ public sealed class QuickBooksCompatibilityTests
             x.Name == "Testing, A"
             && x.Type == ClientReferenceType.Category
             && x.QuickBooksDetailType == "Amortization");
+
+        var globalCategories = await verify.Categories
+            .OrderBy(x => x.Name)
+            .Select(x => x.Name)
+            .ToListAsync();
+
+        Assert.Contains("Office Supplies", globalCategories);
+        Assert.Contains("Testing, A", globalCategories);
+        Assert.DoesNotContain("Chase Business Checking", globalCategories);
+        Assert.DoesNotContain("TEST Visa", globalCategories);
     }
 
     [Fact]
