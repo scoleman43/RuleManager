@@ -86,6 +86,9 @@ public static class DatabaseInitializer
             cancellationToken);
 
         await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "ClientReferences" ADD COLUMN IF NOT EXISTS "QuickBooksAccountNumber" character varying(100);""",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "ClientReferences" ADD COLUMN IF NOT EXISTS "QuickBooksAccountType" character varying(100);""",
             cancellationToken);
         await db.Database.ExecuteSqlRawAsync(
