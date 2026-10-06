@@ -320,6 +320,35 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Import_RecordsQuickBooksRuleName_AndStartsUnmodified()
+    {
+        var factory = CreateFactory(nameof(Import_RecordsQuickBooksRuleName_AndStartsUnmodified));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        using var workbook = BuildWorkbook(
+            ("Imported reusable",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"OFFICE\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Office Supplies\"}]}"),
+            ("Imported card payment",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"CARD\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"TEST Visa\"},{\"actionType\":7,\"value\":\"64\"}]}"));
+
+        var service = new QuickBooksRuleImportService(factory);
+        var items = await service.AnalyzeAsync(organizationId, workbook);
+        await service.ApplyAsync(organizationId, items, clientId);
+
+        await using var db = await factory.CreateDbContextAsync();
+
+        var reusable = await db.MasterRules.SingleAsync(x => x.Name == "Imported reusable");
+        Assert.Equal("Imported reusable", reusable.ImportedQuickBooksRuleName);
+        Assert.False(reusable.IsModifiedSinceImport);
+
+        var clientRule = await db.ClientRules.SingleAsync(x => x.Name == "Imported card payment");
+        Assert.Equal("Imported card payment", clientRule.ImportedQuickBooksRuleName);
+        Assert.False(clientRule.IsModifiedSinceImport);
+    }
+
+    [Fact]
     public async Task Export_GeneratesVerifiedBankTextAmountAndPayeeJson()
     {
         var factory = CreateFactory(nameof(Export_GeneratesVerifiedBankTextAmountAndPayeeJson));
