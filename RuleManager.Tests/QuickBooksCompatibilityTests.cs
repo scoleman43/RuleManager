@@ -671,6 +671,57 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Export_GeneratesEditableClientCreditCardPaymentJson()
+    {
+        var factory = CreateFactory(nameof(Export_GeneratesEditableClientCreditCardPaymentJson));
+        var (_, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.ClientRules.Add(new ClientRule
+            {
+                ClientId = clientId,
+                Name = "Editable Card Payment",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.CreditCardPayment,
+                CategoryName = "TEST Visa",
+                Payee = "TEST Vendor",
+                MatchAllConditions = true,
+                AutoAdd = true,
+                IsAccountSpecific = true,
+                IsReadOnlyImport = false,
+                ExportPriority = 1,
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.BankText,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "CARD PAYMENT"
+                    }
+                }
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new QuickBooksRuleExportService(factory);
+        var result = await service.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Equal(
+            "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"CARD PAYMENT\"}],\"isAndRule\":true}",
+            row.GetCell(1).StringCellValue);
+
+        Assert.Equal(
+            "{\"ruleActions\":[{\"actionType\":0,\"value\":\"TEST Visa\"},{\"actionType\":7,\"value\":\"64\"},{\"actionType\":5,\"value\":\"TEST Vendor\"},{\"actionType\":8,\"value\":true}]}",
+            row.GetCell(2).StringCellValue);
+    }
+
+    [Fact]
     public async Task Export_GeneratesVerifiedBankTextExactMatchJson()
     {
         var factory = CreateFactory(nameof(Export_GeneratesVerifiedBankTextExactMatchJson));
