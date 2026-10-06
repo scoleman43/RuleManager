@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using NPOI.HSSF.UserModel;
 using RuleManager.Core.Domain;
@@ -821,9 +822,23 @@ public sealed class QuickBooksCompatibilityTests
         using var workbook = new HSSFWorkbook(stream);
         var row = workbook.GetSheetAt(0).GetRow(1);
 
-        Assert.Contains("\"value\":\"Office & General Administrative Expenses\"", row.GetCell(2).StringCellValue);
-        Assert.Contains("\"value\":\"Staples Inc.\"", row.GetCell(2).StringCellValue);
-        Assert.DoesNotContain("\"value\":\"Office Supplies\"", row.GetCell(2).StringCellValue);
+        using var outputs = JsonDocument.Parse(row.GetCell(2).StringCellValue);
+        var actions = outputs.RootElement
+            .GetProperty("ruleActions")
+            .EnumerateArray()
+            .ToList();
+
+        Assert.Contains(actions, action =>
+            action.GetProperty("actionType").GetInt32() == 0
+            && action.GetProperty("value").GetString() == "Office & General Administrative Expenses");
+
+        Assert.Contains(actions, action =>
+            action.GetProperty("actionType").GetInt32() == 5
+            && action.GetProperty("value").GetString() == "Staples Inc.");
+
+        Assert.DoesNotContain(actions, action =>
+            action.GetProperty("value").ValueKind == JsonValueKind.String
+            && action.GetProperty("value").GetString() == "Office Supplies");
     }
 
     [Fact]
