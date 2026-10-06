@@ -32,6 +32,8 @@ public static class DatabaseInitializer
                 "ClientId" uuid NOT NULL,
                 "Type" integer NOT NULL,
                 "Name" character varying(255) NOT NULL,
+                "QuickBooksAccountType" character varying(100),
+                "QuickBooksDetailType" character varying(150),
                 "Source" integer NOT NULL,
                 "IsActive" boolean NOT NULL DEFAULT TRUE,
                 CONSTRAINT "PK_ClientReferences" PRIMARY KEY ("Id")
@@ -44,6 +46,13 @@ public static class DatabaseInitializer
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_ClientReferences_ClientId_Type_Name"
             ON "ClientReferences" ("ClientId", "Type", "Name");
             """,
+            cancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "ClientReferences" ADD COLUMN IF NOT EXISTS "QuickBooksAccountType" character varying(100);""",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "ClientReferences" ADD COLUMN IF NOT EXISTS "QuickBooksDetailType" character varying(150);""",
             cancellationToken);
 
         await db.Database.ExecuteSqlRawAsync(
