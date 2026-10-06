@@ -258,6 +258,68 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task ChartOfAccountsImport_StoresQboTypes_AndEnrichesExistingReferences()
+    {
+        var factory = CreateFactory(nameof(ChartOfAccountsImport_StoresQboTypes_AndEnrichesExistingReferences));
+        var (_, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.ClientReferences.Add(new ClientReference
+            {
+                ClientId = clientId,
+                Type = ClientReferenceType.Account,
+                Name = "TEST Visa",
+                Source = ClientReferenceSource.Imported
+            });
+            await db.SaveChangesAsync();
+        }
+
+        const string csv =
+            "Account name,Account type,Detail type\n"
+            + "Chase Business Checking,Bank,Checking\n"
+            + "TEST Visa,Credit Card,Credit Card\n"
+            + "Office Supplies,Expenses,Office/General Administrative Expenses\n"
+            + "\"Testing, A\",Other Expense,Amortization\n";
+
+        await using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(csv));
+        var service = new QuickBooksChartOfAccountsImportService(factory);
+
+        var result = await service.ImportAsync(clientId, stream);
+
+        Assert.Equal(4, result.TotalRows);
+        Assert.Equal(3, result.Added);
+        Assert.Equal(1, result.Updated);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var references = await verify.ClientReferences
+            .Where(x => x.ClientId == clientId)
+            .OrderBy(x => x.Name)
+            .ToListAsync();
+
+        var checking = Assert.Single(references.Where(x => x.Name == "Chase Business Checking"));
+        Assert.Equal(ClientReferenceType.Account, checking.Type);
+        Assert.Equal("Bank", checking.QuickBooksAccountType);
+        Assert.Equal("Checking", checking.QuickBooksDetailType);
+        Assert.Equal(ClientReferenceSource.ChartOfAccountsImport, checking.Source);
+
+        var visa = Assert.Single(references.Where(x => x.Name == "TEST Visa"));
+        Assert.Equal(ClientReferenceType.Account, visa.Type);
+        Assert.Equal("Credit Card", visa.QuickBooksAccountType);
+        Assert.Equal("Credit Card", visa.QuickBooksDetailType);
+        Assert.Equal(ClientReferenceSource.ChartOfAccountsImport, visa.Source);
+
+        var office = Assert.Single(references.Where(x => x.Name == "Office Supplies"));
+        Assert.Equal(ClientReferenceType.Category, office.Type);
+        Assert.Equal("Expenses", office.QuickBooksAccountType);
+
+        Assert.Contains(references, x =>
+            x.Name == "Testing, A"
+            && x.Type == ClientReferenceType.Category
+            && x.QuickBooksDetailType == "Amortization");
+    }
+
+    [Fact]
     public async Task Export_GeneratesVerifiedBankTextAmountAndPayeeJson()
     {
         var factory = CreateFactory(nameof(Export_GeneratesVerifiedBankTextAmountAndPayeeJson));
