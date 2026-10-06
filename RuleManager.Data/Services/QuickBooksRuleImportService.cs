@@ -142,11 +142,13 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
         Guid? clientId = null,
         CancellationToken cancellationToken = default)
     {
-        var selectedLibraryRules = items
+        var allItems = items.ToList();
+
+        var selectedLibraryRules = allItems
             .Where(x => x.Selected && x.Status is RuleImportStatus.New or RuleImportStatus.Changed)
             .ToList();
 
-        var selectedClientSpecificRules = items
+        var selectedClientSpecificRules = allItems
             .Where(x => x.Selected && x.Status == RuleImportStatus.ClientSpecific)
             .ToList();
 
@@ -325,12 +327,91 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             }
         }
 
+        if (clientId.HasValue)
+        {
+            await DiscoverClientReferencesAsync(
+                db,
+                clientId.Value,
+                allItems.Where(x => x.Status is not RuleImportStatus.Unsupported and not RuleImportStatus.Duplicate),
+                cancellationToken);
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         return new RuleImportApplyResult(
             added,
             updated,
             clientSpecificAdded,
             clientSpecificUpdated);
+    }
+
+    private static async Task DiscoverClientReferencesAsync(
+        RuleManagerDbContext db,
+        Guid clientId,
+        IEnumerable<RuleImportPreviewItem> items,
+        CancellationToken cancellationToken)
+    {
+        var discovered = new HashSet<(ClientReferenceType Type, string Name)>();
+
+        foreach (var item in items)
+        {
+            if (!string.IsNullOrWhiteSpace(item.CategoryName))
+            {
+                var type = item.TransactionType is RuleTransactionType.Transfer or RuleTransactionType.CreditCardPayment
+                    ? ClientReferenceType.Account
+                    : ClientReferenceType.Category;
+
+                discovered.Add((type, item.CategoryName.Trim()));
+            }
+
+            if (!string.IsNullOrWhiteSpace(item.Payee))
+                discovered.Add((ClientReferenceType.Payee, item.Payee.Trim()));
+
+            if (item.IsSplitRule
+                && QuickBooksSplitRuleCodec.TryParse(item.OriginalOutputsJson, out var split)
+                && split is not null)
+            {
+                foreach (var line in split.Lines)
+                {
+                    if (!string.IsNullOrWhiteSpace(line.CategoryName))
+                        discovered.Add((ClientReferenceType.Category, line.CategoryName.Trim()));
+                }
+            }
+        }
+
+        if (discovered.Count == 0)
+            return;
+
+        var existing = await db.ClientReferences
+            .Where(x => x.ClientId == clientId)
+            .ToListAsync(cancellationToken);
+
+        foreach (var reference in discovered)
+        {
+            var match = existing.FirstOrDefault(x =>
+                x.Type == reference.Type
+                && string.Equals(x.Name, reference.Name, StringComparison.OrdinalIgnoreCase));
+
+            if (match is null)
+            {
+                match = new ClientReference
+                {
+                    ClientId = clientId,
+                    Type = reference.Type,
+                    Name = reference.Name,
+                    Source = ClientReferenceSource.Imported,
+                    IsActive = true
+                };
+                db.ClientReferences.Add(match);
+                existing.Add(match);
+            }
+            else
+            {
+                match.IsActive = true;
+                if (match.Source != ClientReferenceSource.ApiVerified)
+                    match.Source = ClientReferenceSource.Imported;
+                match.ModifiedUtc = DateTime.UtcNow;
+            }
+        }
     }
 
     private static List<RuleImportPreviewItem> ParseWorkbook(Stream stream)
