@@ -129,7 +129,7 @@ else
                         <div class="input-group">
                             <select class="form-select" @bind="categoryId">
                                 <option value="">-- Select category --</option>
-                                @foreach (var category in categories.Where(x => x.IsActive))
+                                @foreach (var category in CategoryOptions)
                                 {
                                     <option value="@category.Id">@category.Name</option>
                                 }
@@ -139,7 +139,9 @@ else
                             </button>
                         </div>
                         <div class="form-text">
-                            Recommended: create the category in QuickBooks first and import a rule that uses it so RuleManager learns the exact name.
+                            @(clientHasChartOfAccounts
+                                ? "Using categories from this client's imported QuickBooks Chart of Accounts."
+                                : "Using the global category pool. Import this client's QuickBooks Chart of Accounts to use its client-specific category list.")
                         </div>
 
                         @if (showCategoryOverride)
@@ -321,9 +323,11 @@ else
 
     private Guid organizationId;
     private readonly List<Category> categories = new();
+    private readonly List<ClientReference> clientCategoryReferences = new();
     private readonly List<Client> activeClients = new();
     private readonly List<RuleSet> activeRuleSets = new();
     private readonly List<RuleCondition> conditions = new();
+    private bool clientHasChartOfAccounts;
 
     private string ruleName = string.Empty;
     private RuleDirection direction = RuleDirection.MoneyOut;
@@ -358,10 +362,34 @@ else
     private IReadOnlyList<RuleTransactionType> AllowedTransactionTypes =>
         MasterRulePolicy.GetAllowedTransactionTypes(direction);
 
+    private IEnumerable<Category> CategoryOptions
+    {
+        get
+        {
+            var active = categories.Where(x => x.IsActive);
+
+            if (!CloneClientId.HasValue || !clientHasChartOfAccounts)
+                return active.OrderBy(x => x.Name);
+
+            var allowedNames = clientCategoryReferences
+                .Where(x => x.Type == ClientReferenceType.Category && x.IsActive)
+                .Select(x => x.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            return active
+                .Where(x => allowedNames.Contains(x.Name)
+                    || (!string.IsNullOrWhiteSpace(categoryId)
+                        && Guid.TryParse(categoryId, out var selectedId)
+                        && x.Id == selectedId))
+                .OrderBy(x => x.Name);
+        }
+    }
+
     protected override async Task OnParametersSetAsync()
     {
         organizationId = await Workspace.GetOrCreateDefaultOrganizationIdAsync();
         await LoadCategoriesAsync();
+        await LoadClientCategoryReferencesAsync();
         await LoadClientsAsync();
         await LoadRuleSetsAsync();
 
@@ -382,6 +410,26 @@ else
             .OrderBy(x => x.Name)
             .AsNoTracking()
             .ToListAsync());
+    }
+
+    private async Task LoadClientCategoryReferencesAsync()
+    {
+        clientCategoryReferences.Clear();
+        clientHasChartOfAccounts = false;
+
+        if (!CloneClientId.HasValue)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        clientCategoryReferences.AddRange(await db.ClientReferences
+            .Where(x => x.ClientId == CloneClientId.Value && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+
+        clientHasChartOfAccounts = clientCategoryReferences.Any(x =>
+            x.Source == ClientReferenceSource.ChartOfAccountsImport);
     }
 
     private async Task LoadClientsAsync()
