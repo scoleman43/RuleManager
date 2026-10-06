@@ -18,8 +18,10 @@ builder.Services.AddScoped<WorkspaceService>();
 builder.Services.AddScoped<RuleSetAssignmentService>();
 builder.Services.AddScoped<QuickBooksRuleImportService>();
 builder.Services.AddScoped<QuickBooksChartOfAccountsImportService>();
+builder.Services.AddScoped<QuickBooksChartOfAccountsExportService>();
 builder.Services.AddScoped<QuickBooksVendorImportService>();
 builder.Services.AddScoped<QuickBooksRuleExportService>();
+builder.Services.AddScoped<ClientCloneService>();
 
 var app = builder.Build();
 
