@@ -455,14 +455,29 @@ else
     @if (clientSpecificRules.Count > 0)
     {
         <div class="card mt-4">
-            <div class="card-body">
-                <h5 class="card-title mb-1">Client-Specific Imported Rules (@clientSpecificRules.Count)</h5>
-                <div class="text-muted small mb-3">
-                    These rules contain QuickBooks account-specific data that cannot be safely shared with other clients.
-                    They still participate in the same QuickBooks export priority sequence shown above.
+            <button type="button"
+                    class="btn text-start w-100 p-0 border-0"
+                    @onclick="ToggleClientSpecificRulesSection">
+                <div class="card-body d-flex justify-content-between align-items-center">
+                    <div>
+                        <h5 class="card-title mb-1">Client-Specific Imported Rules (@clientSpecificRules.Count)</h5>
+                        <div class="text-muted small">
+                            These rules contain QuickBooks account-specific data that cannot be safely shared with other clients.
+                        </div>
+                    </div>
+                    <span class="fs-4" aria-hidden="true">@(showClientSpecificRulesSection ? "▲" : "▼")</span>
                 </div>
+            </button>
 
-                <div class="table-responsive">
+            @if (showClientSpecificRulesSection)
+            {
+                <div class="card-body border-top">
+                    <div class="text-muted small mb-3">
+                        They participate in the same QuickBooks export priority sequence shown above.
+                        Verified Credit card payment rules can now be edited using this client's QuickBooks references.
+                    </div>
+
+                    <div class="table-responsive">
                     <table class="table table-hover mb-0 align-middle">
                         <thead>
                             <tr>
@@ -474,6 +489,7 @@ else
                                 <th>Auto Add</th>
                                 <th>Status</th>
                                 <th class="text-end" style="width: 120px;">Move</th>
+                                <th class="text-end">Action</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -521,13 +537,27 @@ else
                                             </div>
                                         }
                                     </td>
+                                    <td class="text-end">
+                                        @if (rule.TransactionType == RuleTransactionType.CreditCardPayment)
+                                        {
+                                            <button class="btn btn-sm btn-outline-primary"
+                                                    @onclick="() => EditClientSpecificRule(rule.Id)">
+                                                Edit
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <span class="small text-muted">Preserved</span>
+                                        }
+                                    </td>
 
                                 </tr>
                             }
                         </tbody>
                     </table>
+                    </div>
                 </div>
-            </div>
+            }
         </div>
     }
 }
@@ -553,6 +583,7 @@ else
     private bool showQuickBooksReferencesSection;
     private bool showRuleSetsSection;
     private bool showAssignedRulesSection = true;
+    private bool showClientSpecificRulesSection;
 
     private string selectedRuleSetId = string.Empty;
 
@@ -880,6 +911,12 @@ else
     private void ToggleRuleSetsSection() => showRuleSetsSection = !showRuleSetsSection;
 
     private void ToggleAssignedRulesSection() => showAssignedRulesSection = !showAssignedRulesSection;
+
+    private void ToggleClientSpecificRulesSection() =>
+        showClientSpecificRulesSection = !showClientSpecificRulesSection;
+
+    private void EditClientSpecificRule(Guid clientRuleId) =>
+        Navigation.NavigateTo($"/clients/{ClientId}/rules/{clientRuleId}/edit");
 
     private ClientRuleAssignment? AssignmentFor(Guid masterRuleId) =>
         assignments.FirstOrDefault(x => x.MasterRuleId == masterRuleId);
