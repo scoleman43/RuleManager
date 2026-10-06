@@ -8,6 +8,7 @@
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject RuleSetAssignmentService RuleSetAssignments
 @inject QuickBooksChartOfAccountsImportService ChartOfAccountsImport
+@inject QuickBooksVendorImportService VendorImport
 @inject NavigationManager Navigation
 
 <PageTitle>Client Rules</PageTitle>
@@ -70,7 +71,7 @@ else
                 <div>
                     <h5 class="card-title mb-1">Known QuickBooks References (@clientReferences.Count)</h5>
                     <div class="text-muted small">
-                        Learned from QuickBooks rule imports and this client's Chart of Accounts export.
+                        Learned from QuickBooks rule imports, this client's Chart of Accounts, and Vendor exports.
                     </div>
                 </div>
                 <span class="fs-4" aria-hidden="true">@(showQuickBooksReferencesSection ? "▲" : "▼")</span>
@@ -84,13 +85,23 @@ else
                     <div class="text-muted small">
                         Source bank-account scope is not included in the QBO rule XLS format.
                     </div>
-                    <div style="min-width: 320px;">
-                        <label class="form-label small mb-1">Import QBO Chart of Accounts</label>
-                        <InputFile class="form-control form-control-sm"
-                                   OnChange="HandleChartOfAccountsFileAsync"
-                                   accept=".csv"
-                                   disabled="@isChartOfAccountsImportBusy" />
-                        <div class="form-text">Use the CSV exported from QuickBooks Online → Chart of accounts.</div>
+                    <div class="d-flex gap-3 flex-wrap">
+                        <div style="min-width: 320px;">
+                            <label class="form-label small mb-1">Import QBO Chart of Accounts</label>
+                            <InputFile class="form-control form-control-sm"
+                                       OnChange="HandleChartOfAccountsFileAsync"
+                                       accept=".csv"
+                                       disabled="@isChartOfAccountsImportBusy" />
+                            <div class="form-text">Use the CSV exported from QuickBooks Online → Chart of accounts.</div>
+                        </div>
+                        <div style="min-width: 320px;">
+                            <label class="form-label small mb-1">Import QBO Vendors / Payees</label>
+                            <InputFile class="form-control form-control-sm"
+                                       OnChange="HandleVendorFileAsync"
+                                       accept=".xls"
+                                       disabled="@isVendorImportBusy" />
+                            <div class="form-text">Use the XLS exported from QuickBooks Online → Expenses &amp; Bills → Vendors.</div>
+                        </div>
                     </div>
                 </div>
 
@@ -590,6 +601,7 @@ else
     private string? referenceMessage;
     private bool referenceMessageIsError;
     private bool isChartOfAccountsImportBusy;
+    private bool isVendorImportBusy;
     private bool showQuickBooksReferencesSection;
     private bool showRuleSetsSection;
     private bool showAssignedRulesSection = true;
@@ -906,6 +918,41 @@ else
         finally
         {
             isChartOfAccountsImportBusy = false;
+        }
+    }
+
+    private async Task HandleVendorFileAsync(InputFileChangeEventArgs e)
+    {
+        referenceMessage = null;
+        referenceMessageIsError = false;
+
+        var file = e.File;
+        if (!file.Name.EndsWith(".xls", StringComparison.OrdinalIgnoreCase))
+        {
+            referenceMessage = "Select the .xls file exported from QuickBooks Online Vendors.";
+            referenceMessageIsError = true;
+            return;
+        }
+
+        isVendorImportBusy = true;
+
+        try
+        {
+            await using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+            var result = await VendorImport.ImportAsync(ClientId, stream);
+
+            referenceMessage =
+                $"Vendors imported: {result.TotalRows} row(s), {result.Added} added, {result.Updated} updated.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            referenceMessage = $"Vendor import failed: {ex.Message}";
+            referenceMessageIsError = true;
+        }
+        finally
+        {
+            isVendorImportBusy = false;
         }
     }
 
@@ -1236,6 +1283,7 @@ else
     {
         ClientReferenceSource.Imported => "Rule import",
         ClientReferenceSource.ChartOfAccountsImport => "Chart of Accounts import",
+        ClientReferenceSource.VendorImport => "Vendor import",
         ClientReferenceSource.ManualOverride => "Manual override",
         ClientReferenceSource.ApiVerified => "API verified",
         _ => source.ToString()
