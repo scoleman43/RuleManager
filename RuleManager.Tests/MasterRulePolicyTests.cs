@@ -21,15 +21,18 @@ public class MasterRulePolicyTests
     }
 
     [Fact]
-    public void MoneyIn_AllowsDepositAndTransfer()
+    public void MoneyIn_AllowsDepositTransferAndCreditCardPayment()
     {
         var allowed = MasterRulePolicy.GetAllowedTransactionTypes(RuleDirection.MoneyIn);
 
         Assert.Contains(RuleTransactionType.Deposit, allowed);
         Assert.Contains(RuleTransactionType.Transfer, allowed);
+        Assert.Contains(RuleTransactionType.CreditCardPayment, allowed);
         Assert.DoesNotContain(RuleTransactionType.Expense, allowed);
         Assert.DoesNotContain(RuleTransactionType.Check, allowed);
-        Assert.DoesNotContain(RuleTransactionType.CreditCardPayment, allowed);
+        Assert.True(MasterRulePolicy.CanCreate(
+            RuleDirection.MoneyIn,
+            RuleTransactionType.CreditCardPayment));
     }
 
     [Fact]
