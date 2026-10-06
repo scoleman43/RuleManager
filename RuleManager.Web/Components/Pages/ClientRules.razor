@@ -290,13 +290,7 @@ else
         @if (showAssignedRulesSection)
         {
             <div class="card-body border-top">
-                <div class="d-flex justify-content-end mb-3 gap-2 flex-wrap">
-                    <button class="btn btn-outline-primary"
-                            @onclick="CreateCreditCardRule"
-                            disabled="@(!CanCreateCreditCardRule)"
-                            title="@(CanCreateCreditCardRule ? "Create a new client-specific credit card payment rule." : "Import this client's Chart of Accounts first so a bank or credit-card destination account is available.")">
-                        New Credit Card Rule
-                    </button>
+                <div class="d-flex justify-content-end mb-3">
                     <button class="btn btn-outline-primary" @onclick="OpenDirectRulePicker">Add Direct Rule</button>
                 </div>
 
@@ -708,11 +702,6 @@ else
         string.Equals(x.QuickBooksAccountType, "Bank", StringComparison.OrdinalIgnoreCase));
     private int CreditCardReferenceCount => clientReferences.Count(x =>
         string.Equals(x.QuickBooksAccountType, "Credit Card", StringComparison.OrdinalIgnoreCase));
-    private bool CanCreateCreditCardRule => clientReferences.Any(x =>
-        x.Type == ClientReferenceType.Account
-        && x.IsActive
-        && (string.Equals(x.QuickBooksAccountType, "Bank", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(x.QuickBooksAccountType, "Credit Card", StringComparison.OrdinalIgnoreCase)));
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
@@ -971,9 +960,6 @@ else
 
     private void CloneForClient(Guid ruleId) =>
         Navigation.NavigateTo($"/rules/new?cloneFrom={ruleId}&clientId={ClientId}");
-
-    private void CreateCreditCardRule() =>
-        Navigation.NavigateTo($"/clients/{ClientId}/rules/new-credit-card");
 
 
     private void ToggleQuickBooksReferencesSection() =>
