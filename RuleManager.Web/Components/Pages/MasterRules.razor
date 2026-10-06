@@ -7,6 +7,7 @@
 @using RuleManager.Data.Services
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject WorkspaceService Workspace
+@inject RuleSetAssignmentService RuleSetAssignments
 @inject NavigationManager Navigation
 @inject IJSRuntime JS
 
@@ -97,10 +98,109 @@
             @if (selectedRuleIds.Count > 0)
             {
                 <button class="btn btn-sm btn-outline-secondary" @onclick="ClearSelection">Clear Selection</button>
+                <button class="btn btn-sm btn-outline-primary" @onclick="OpenBulkRuleSetAssignAsync">
+                    Add to Rule Set
+                </button>
+                <button class="btn btn-sm btn-outline-primary" @onclick="OpenBulkDirectAssignAsync">
+                    Assign Directly
+                </button>
                 <button class="btn btn-sm btn-outline-danger" @onclick="DeleteSelectedRulesAsync">
                     Delete Selected (@selectedRuleIds.Count)
                 </button>
             }
+        </div>
+    </div>
+}
+
+@if (showBulkDirectAssign)
+{
+    <div class="rule-modal-backdrop" @onclick="CloseBulkDirectAssign">
+        <div class="rule-modal-dialog" @onclick:stopPropagation="true">
+            <div class="rule-modal-header">
+                <div>
+                    <div class="rule-modal-eyebrow">Bulk direct assignment</div>
+                    <h5 class="mb-1">Assign @selectedRuleIds.Count selected rule(s)</h5>
+                    <div class="text-muted small">Choose the client that should receive all selected reusable rules.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseBulkDirectAssign">Close</button>
+            </div>
+
+            <div class="rule-modal-body">
+                @if (activeClients.Count == 0)
+                {
+                    <div class="text-muted">No active clients are available.</div>
+                }
+                else
+                {
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Find client</label>
+                            <input class="form-control"
+                                   @bind="clientSearchText"
+                                   @bind:event="oninput"
+                                   placeholder="Start typing a client name..." />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Client</label>
+                            <select class="form-select" @bind="selectedDirectClientId">
+                                <option value="">-- Select client --</option>
+                                @foreach (var client in DirectClientOptions)
+                                {
+                                    <option value="@client.Id">@client.Name</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <div class="rule-modal-footer">
+                <button class="btn btn-outline-secondary" @onclick="CloseBulkDirectAssign">Cancel</button>
+                <button class="btn btn-primary" @onclick="AssignSelectedDirectlyAsync" disabled="@(activeClients.Count == 0)">
+                    Assign @selectedRuleIds.Count Rule(s)
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (showBulkRuleSetAssign)
+{
+    <div class="rule-modal-backdrop" @onclick="CloseBulkRuleSetAssign">
+        <div class="rule-modal-dialog" @onclick:stopPropagation="true">
+            <div class="rule-modal-header">
+                <div>
+                    <div class="rule-modal-eyebrow">Bulk Rule Set assignment</div>
+                    <h5 class="mb-1">Add @selectedRuleIds.Count selected rule(s) to a Rule Set</h5>
+                    <div class="text-muted small">Existing Rule Set memberships will be kept and duplicates will be skipped.</div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CloseBulkRuleSetAssign">Close</button>
+            </div>
+
+            <div class="rule-modal-body">
+                @if (activeRuleSets.Count == 0)
+                {
+                    <div class="text-muted">No active Rule Sets are available.</div>
+                }
+                else
+                {
+                    <label class="form-label">Rule Set</label>
+                    <select class="form-select" @bind="selectedBulkRuleSetId">
+                        <option value="">-- Select Rule Set --</option>
+                        @foreach (var set in activeRuleSets)
+                        {
+                            <option value="@set.Id">@set.Name</option>
+                        }
+                    </select>
+                }
+            </div>
+
+            <div class="rule-modal-footer">
+                <button class="btn btn-outline-secondary" @onclick="CloseBulkRuleSetAssign">Cancel</button>
+                <button class="btn btn-primary" @onclick="AddSelectedToRuleSetAsync" disabled="@(activeRuleSets.Count == 0)">
+                    Add @selectedRuleIds.Count Rule(s)
+                </button>
+            </div>
         </div>
     </div>
 }
@@ -293,7 +393,11 @@
     private bool isError;
 
     private MasterRule? batchRule;
+    private bool showBulkDirectAssign;
+    private bool showBulkRuleSetAssign;
     private readonly List<Client> activeClients = new();
+    private readonly List<RuleSet> activeRuleSets = new();
+    private string selectedBulkRuleSetId = string.Empty;
     private readonly HashSet<Guid> directAssignedClientIds = new();
     private string clientSearchText = string.Empty;
     private string selectedDirectClientId = string.Empty;
@@ -423,6 +527,199 @@
 
     private void ClearSelection() => selectedRuleIds.Clear();
 
+    private async Task OpenBulkDirectAssignAsync()
+    {
+        if (selectedRuleIds.Count == 0)
+            return;
+
+        batchRule = null;
+        showBulkRuleSetAssign = false;
+        showBulkDirectAssign = true;
+        clientSearchText = string.Empty;
+        selectedDirectClientId = string.Empty;
+        directAssignedClientIds.Clear();
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        activeClients.Clear();
+        activeClients.AddRange(await db.Clients
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+    }
+
+    private void CloseBulkDirectAssign()
+    {
+        showBulkDirectAssign = false;
+        activeClients.Clear();
+        clientSearchText = string.Empty;
+        selectedDirectClientId = string.Empty;
+        directAssignedClientIds.Clear();
+    }
+
+    private async Task AssignSelectedDirectlyAsync()
+    {
+        if (selectedRuleIds.Count == 0)
+            return;
+
+        Guid clientId;
+        if (Guid.TryParse(selectedDirectClientId, out var selectedId))
+        {
+            clientId = selectedId;
+        }
+        else
+        {
+            var matches = DirectClientOptions.ToList();
+            if (matches.Count != 1)
+            {
+                message = matches.Count == 0
+                    ? "Enter a client name or select a client from the dropdown."
+                    : "More than one client matches. Select the client you want from the dropdown.";
+                isError = true;
+                return;
+            }
+
+            clientId = matches[0].Id;
+        }
+
+        var ids = selectedRuleIds.ToArray();
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var validRuleIds = await db.MasterRules
+            .Where(x => x.OrganizationId == organizationId && x.IsActive && ids.Contains(x.Id))
+            .Select(x => x.Id)
+            .ToListAsync();
+
+        var existing = await db.ClientRuleAssignments
+            .Where(x => x.ClientId == clientId && validRuleIds.Contains(x.MasterRuleId))
+            .ToListAsync();
+
+        var existingByRule = existing.ToDictionary(x => x.MasterRuleId);
+        var assignmentMax = await db.ClientRuleAssignments
+            .Where(x => x.ClientId == clientId)
+            .Select(x => (int?)x.ExportPriority)
+            .MaxAsync() ?? 0;
+        var clientRuleMax = await db.ClientRules
+            .Where(x => x.ClientId == clientId)
+            .Select(x => (int?)x.ExportPriority)
+            .MaxAsync() ?? 0;
+        var nextPriority = Math.Max(assignmentMax, clientRuleMax) + 1;
+
+        var added = 0;
+        var alreadyDirect = 0;
+
+        foreach (var ruleId in validRuleIds)
+        {
+            if (existingByRule.TryGetValue(ruleId, out var assignment))
+            {
+                if (assignment.IsExplicit)
+                {
+                    alreadyDirect++;
+                    continue;
+                }
+
+                assignment.IsExplicit = true;
+                assignment.ModifiedUtc = DateTime.UtcNow;
+                added++;
+                continue;
+            }
+
+            db.ClientRuleAssignments.Add(new ClientRuleAssignment
+            {
+                ClientId = clientId,
+                MasterRuleId = ruleId,
+                Status = RuleAssignmentStatus.Inherited,
+                IsExplicit = true,
+                ExportPriority = nextPriority++
+            });
+            added++;
+        }
+
+        await db.SaveChangesAsync();
+
+        var clientName = activeClients.FirstOrDefault(x => x.Id == clientId)?.Name ?? "client";
+        message = alreadyDirect > 0
+            ? $"{added} rule(s) assigned directly to {clientName}; {alreadyDirect} were already directly assigned."
+            : $"{added} rule(s) assigned directly to {clientName}.";
+        isError = false;
+
+        CloseBulkDirectAssign();
+        selectedRuleIds.Clear();
+        await LoadAsync();
+    }
+
+    private async Task OpenBulkRuleSetAssignAsync()
+    {
+        if (selectedRuleIds.Count == 0)
+            return;
+
+        batchRule = null;
+        showBulkDirectAssign = false;
+        showBulkRuleSetAssign = true;
+        selectedBulkRuleSetId = string.Empty;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        activeRuleSets.Clear();
+        activeRuleSets.AddRange(await db.RuleSets
+            .Where(x => x.OrganizationId == organizationId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+    }
+
+    private void CloseBulkRuleSetAssign()
+    {
+        showBulkRuleSetAssign = false;
+        activeRuleSets.Clear();
+        selectedBulkRuleSetId = string.Empty;
+    }
+
+    private async Task AddSelectedToRuleSetAsync()
+    {
+        if (selectedRuleIds.Count == 0)
+            return;
+
+        if (!Guid.TryParse(selectedBulkRuleSetId, out var ruleSetId))
+        {
+            message = "Select the Rule Set you want to add the rules to.";
+            isError = true;
+            return;
+        }
+
+        var ids = selectedRuleIds.ToArray();
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var validRuleIds = await db.MasterRules
+            .Where(x => x.OrganizationId == organizationId && x.IsActive && ids.Contains(x.Id))
+            .Select(x => x.Id)
+            .ToListAsync();
+
+        var existingIds = await db.RuleSetRules
+            .Where(x => x.RuleSetId == ruleSetId && validRuleIds.Contains(x.MasterRuleId))
+            .Select(x => x.MasterRuleId)
+            .ToListAsync();
+
+        var existingSet = existingIds.ToHashSet();
+        var added = 0;
+
+        foreach (var ruleId in validRuleIds.Where(x => !existingSet.Contains(x)))
+        {
+            await RuleSetAssignments.AddRuleToSetAsync(ruleSetId, ruleId);
+            added++;
+        }
+
+        var setName = activeRuleSets.FirstOrDefault(x => x.Id == ruleSetId)?.Name ?? "Rule Set";
+        var skipped = validRuleIds.Count - added;
+        message = skipped > 0
+            ? $"{added} rule(s) added to '{setName}'; {skipped} were already members."
+            : $"{added} rule(s) added to '{setName}'.";
+        isError = false;
+
+        CloseBulkRuleSetAssign();
+        selectedRuleIds.Clear();
+        await LoadAsync();
+    }
+
     private async Task DeleteSelectedRulesAsync()
     {
         var ids = selectedRuleIds.ToArray();
@@ -518,6 +815,8 @@
 
     private async Task OpenBatchAssignAsync(MasterRule rule)
     {
+        showBulkDirectAssign = false;
+        showBulkRuleSetAssign = false;
         batchRule = rule;
         clientSearchText = string.Empty;
         selectedDirectClientId = string.Empty;
