@@ -380,10 +380,27 @@
                 For incremental imports, review and manually reposition newly imported rules in QuickBooks after import.
             </div>
 
+            @if (exportDuplicateNameRisks.Count > 0)
+            {
+                <div class="alert alert-danger mb-3">
+                    <strong>Changed rules may be rejected by QuickBooks:</strong>
+                    QuickBooks does not update an existing rule when the imported rule has the same name.
+                    Delete the existing rule in QBO before importing, or rename the RuleManager rule so it imports as a new rule.
+                    <ul class="mb-0 mt-2">
+                        @foreach (var ruleName in exportDuplicateNameRisks)
+                        {
+                            <li>@ruleName</li>
+                        }
+                    </ul>
+                </div>
+            }
+
             <div class="row g-3 align-items-end">
                 <div class="col-lg-8">
                     <label class="form-label">Client</label>
-                    <select class="form-select" @bind="exportClientId">
+                    <select class="form-select"
+                            @bind="exportClientId"
+                            @bind:after="LoadExportChangeWarningsAsync">
                         <option value="">-- Select client --</option>
                         @foreach (var client in clients)
                         {
@@ -429,6 +446,7 @@
     private bool isImportBusy;
     private bool isExportBusy;
     private readonly List<string> exportErrors = new();
+    private readonly List<string> exportDuplicateNameRisks = new();
     private string importClientId = string.Empty;
     private string exportClientId = string.Empty;
     private string? importFileName;
@@ -505,6 +523,7 @@
         showImport = false;
         showImportReview = false;
         exportErrors.Clear();
+        exportDuplicateNameRisks.Clear();
         message = null;
     }
 
@@ -513,6 +532,50 @@
         showExport = false;
         exportClientId = string.Empty;
         exportErrors.Clear();
+        exportDuplicateNameRisks.Clear();
+    }
+
+    private async Task LoadExportChangeWarningsAsync()
+    {
+        exportDuplicateNameRisks.Clear();
+
+        if (!Guid.TryParse(exportClientId, out var clientId))
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var assignedRuleIds = await db.ClientRuleAssignments
+            .Where(x => x.ClientId == clientId)
+            .Select(x => x.MasterRuleId)
+            .ToListAsync();
+
+        var reusableCandidates = await db.MasterRules
+            .Where(x => assignedRuleIds.Contains(x.Id)
+                && x.IsActive
+                && x.IsModifiedSinceImport
+                && x.ImportedQuickBooksRuleName != null)
+            .Select(x => new { x.Name, x.ImportedQuickBooksRuleName })
+            .AsNoTracking()
+            .ToListAsync();
+
+        var clientCandidates = await db.ClientRules
+            .Where(x => x.ClientId == clientId
+                && x.IsAccountSpecific
+                && x.IsModifiedSinceImport
+                && x.ImportedQuickBooksRuleName != null)
+            .Select(x => new { x.Name, x.ImportedQuickBooksRuleName })
+            .AsNoTracking()
+            .ToListAsync();
+
+        exportDuplicateNameRisks.AddRange(reusableCandidates
+            .Concat(clientCandidates)
+            .Where(x => string.Equals(
+                x.Name,
+                x.ImportedQuickBooksRuleName,
+                StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase));
     }
 
     private async Task HandleImportFileAsync(InputFileChangeEventArgs e)
