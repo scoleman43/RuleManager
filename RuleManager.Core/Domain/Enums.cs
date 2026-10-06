@@ -63,6 +63,7 @@ public enum ClientReferenceSource
 {
     Imported,
     ChartOfAccountsImport,
+    VendorImport,
     ManualOverride,
     ApiVerified
 }
