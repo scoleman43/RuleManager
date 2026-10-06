@@ -15,7 +15,11 @@ public sealed class QuickBooksVendorImportService(
         Stream workbookStream,
         CancellationToken cancellationToken = default)
     {
-        using var workbook = new HSSFWorkbook(workbookStream);
+        using var bufferedStream = new MemoryStream();
+        await workbookStream.CopyToAsync(bufferedStream, cancellationToken);
+        bufferedStream.Position = 0;
+
+        using var workbook = new HSSFWorkbook(bufferedStream);
 
         if (workbook.NumberOfSheets == 0)
             throw new InvalidDataException("The vendor workbook does not contain a worksheet.");
