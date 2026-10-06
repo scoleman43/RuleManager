@@ -43,6 +43,15 @@ public sealed class Category : Entity
     }
 }
 
+public sealed class ClientReference : Entity
+{
+    public Guid ClientId { get; set; }
+    public ClientReferenceType Type { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public ClientReferenceSource Source { get; set; } = ClientReferenceSource.Imported;
+    public bool IsActive { get; set; } = true;
+}
+
 public sealed class RuleCondition
 {
     public RuleMatchField Field { get; set; }
