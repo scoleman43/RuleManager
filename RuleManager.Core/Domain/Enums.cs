@@ -62,6 +62,7 @@ public enum ClientReferenceType
 public enum ClientReferenceSource
 {
     Imported,
+    ChartOfAccountsImport,
     ManualOverride,
     ApiVerified
 }
