@@ -1,0 +1,348 @@
+@page "/clients/{ClientId:guid}/rules/{ClientRuleId:guid}/edit"
+@rendermode InteractiveServer
+@using Microsoft.EntityFrameworkCore
+@using RuleManager.Core.Domain
+@using RuleManager.Core.Rules
+@using RuleManager.Data
+@inject IDbContextFactory<RuleManagerDbContext> DbFactory
+@inject NavigationManager Navigation
+
+<PageTitle>Edit Client Rule</PageTitle>
+
+@if (client is null || rule is null)
+{
+    <p>Loading rule...</p>
+}
+else
+{
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+            <button class="btn btn-link p-0 mb-2" @onclick="ReturnToClient">← Back to Client Rules</button>
+            <h1>Edit Client-Specific Rule</h1>
+            <p class="text-muted mb-0">@client.Name — Credit card payment</p>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(message))
+    {
+        <div class="alert @(isError ? "alert-danger" : "alert-success")">@message</div>
+    }
+
+    <div class="card">
+        <div class="card-body">
+            <div class="alert alert-info">
+                This editor is currently limited to verified QuickBooks Credit card payment rules. The exported rule applies to all bank accounts because QBO's XLS format does not preserve source bank scope.
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label">Rule name</label>
+                    <input class="form-control" @bind="ruleName" />
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label">Money direction</label>
+                    <input class="form-control" value="Money out" disabled />
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label">Transaction type</label>
+                    <input class="form-control" value="Credit card payment" disabled />
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Destination account</label>
+                    <select class="form-select" @bind="destinationAccount">
+                        <option value="">-- Select bank or credit card account --</option>
+                        @foreach (var account in DestinationAccountOptions)
+                        {
+                            <option value="@account">@account</option>
+                        }
+                    </select>
+                    <div class="form-text">Accounts come from this client's imported QuickBooks references and Chart of Accounts.</div>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Payee</label>
+                    <select class="form-select" @bind="payee">
+                        <option value="">-- No payee --</option>
+                        @foreach (var option in PayeeOptions)
+                        {
+                            <option value="@option">@option</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="col-md-6">
+                    <label class="form-label">Condition logic</label>
+                    <select class="form-select" @bind="conditionLogic">
+                        <option value="all">Match all conditions</option>
+                        <option value="any">Match any condition</option>
+                    </select>
+                </div>
+
+                <div class="col-md-6 d-flex align-items-end">
+                    <div class="form-check mb-2">
+                        <input class="form-check-input" type="checkbox" @bind="autoAdd" id="autoPostClientRule" />
+                        <label class="form-check-label" for="autoPostClientRule">Auto-post matching transactions</label>
+                    </div>
+                </div>
+            </div>
+
+            <hr />
+
+            <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Conditions</h6>
+                <button class="btn btn-sm btn-outline-primary" @onclick="AddCondition">Add Condition</button>
+            </div>
+
+            @for (var i = 0; i < conditions.Count; i++)
+            {
+                var index = i;
+                var condition = conditions[index];
+
+                <div class="row g-2 mb-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label">Field</label>
+                        <select class="form-select" value="@condition.Field" @onchange="e => ConditionFieldChanged(index, e)">
+                            <option value="@RuleMatchField.BankText">Bank text</option>
+                            <option value="@RuleMatchField.Description">Description</option>
+                            <option value="@RuleMatchField.Amount">Amount</option>
+                        </select>
+                    </div>
+
+                    <div class="col-md-3">
+                        <label class="form-label">Operator</label>
+                        <select class="form-select" @bind="condition.Operator">
+                            @foreach (var op in MasterRulePolicy.GetAllowedOperators(condition.Field))
+                            {
+                                <option value="@op">@FormatOperator(op)</option>
+                            }
+                        </select>
+                    </div>
+
+                    <div class="col-md-5">
+                        <label class="form-label">Value</label>
+                        <input class="form-control" @bind="condition.Value" />
+                    </div>
+
+                    <div class="col-md-1">
+                        <button class="btn btn-outline-danger w-100"
+                                @onclick="() => RemoveCondition(index)"
+                                disabled="@(conditions.Count == 1)">×</button>
+                    </div>
+                </div>
+            }
+
+            <div class="d-flex gap-2 mt-4">
+                <button class="btn btn-primary" @onclick="SaveAsync">Save Rule</button>
+                <button class="btn btn-outline-secondary" @onclick="ReturnToClient">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid ClientId { get; set; }
+    [Parameter] public Guid ClientRuleId { get; set; }
+
+    private Client? client;
+    private ClientRule? rule;
+    private readonly List<ClientReference> references = new();
+    private readonly List<RuleCondition> conditions = new();
+
+    private string ruleName = string.Empty;
+    private string destinationAccount = string.Empty;
+    private string payee = string.Empty;
+    private string conditionLogic = "all";
+    private bool autoAdd;
+    private string? message;
+    private bool isError;
+
+    private IEnumerable<string> DestinationAccountOptions
+    {
+        get
+        {
+            var names = references
+                .Where(x => x.Type == ClientReferenceType.Account
+                    && (string.Equals(x.QuickBooksAccountType, "Bank", StringComparison.OrdinalIgnoreCase)
+                        || string.Equals(x.QuickBooksAccountType, "Credit Card", StringComparison.OrdinalIgnoreCase)
+                        || string.IsNullOrWhiteSpace(x.QuickBooksAccountType)))
+                .Select(x => x.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(destinationAccount))
+                names.Add(destinationAccount);
+
+            return names.OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    private IEnumerable<string> PayeeOptions
+    {
+        get
+        {
+            var names = references
+                .Where(x => x.Type == ClientReferenceType.Payee)
+                .Select(x => x.Name)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(payee))
+                names.Add(payee);
+
+            return names.OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        client = await db.Clients
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == ClientId);
+
+        rule = await db.ClientRules
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == ClientRuleId && x.ClientId == ClientId);
+
+        if (client is null || rule is null)
+        {
+            Navigation.NavigateTo("/clients");
+            return;
+        }
+
+        if (rule.TransactionType != RuleTransactionType.CreditCardPayment)
+        {
+            Navigation.NavigateTo($"/clients/{ClientId}/rules");
+            return;
+        }
+
+        references.Clear();
+        references.AddRange(await db.ClientReferences
+            .Where(x => x.ClientId == ClientId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+
+        ruleName = rule.Name;
+        destinationAccount = rule.CategoryName ?? string.Empty;
+        payee = rule.Payee ?? string.Empty;
+        conditionLogic = rule.MatchAllConditions ? "all" : "any";
+        autoAdd = rule.AutoAdd;
+
+        conditions.Clear();
+        conditions.AddRange(rule.Conditions.Select(x => new RuleCondition
+        {
+            Field = x.Field,
+            Operator = x.Operator,
+            Value = x.Value
+        }));
+
+        if (conditions.Count == 0)
+            conditions.Add(NewCondition());
+    }
+
+    private void AddCondition() => conditions.Add(NewCondition());
+
+    private void RemoveCondition(int index)
+    {
+        if (conditions.Count > 1 && index >= 0 && index < conditions.Count)
+            conditions.RemoveAt(index);
+    }
+
+    private void ConditionFieldChanged(int index, ChangeEventArgs e)
+    {
+        if (index < 0 || index >= conditions.Count)
+            return;
+
+        if (Enum.TryParse<RuleMatchField>(e.Value?.ToString(), out var parsed))
+        {
+            conditions[index].Field = parsed;
+            conditions[index].Operator = MasterRulePolicy.GetAllowedOperators(parsed)[0];
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        var name = ruleName.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            SetError("Rule name is required.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(destinationAccount))
+        {
+            SetError("Select a destination bank or credit card account.");
+            return;
+        }
+
+        if (conditions.Count == 0 || conditions.Any(x => string.IsNullOrWhiteSpace(x.Value)))
+        {
+            SetError("Every rule needs at least one condition with a value.");
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var entity = await db.ClientRules
+            .SingleOrDefaultAsync(x => x.Id == ClientRuleId && x.ClientId == ClientId);
+
+        if (entity is null)
+        {
+            SetError("The client rule no longer exists.");
+            return;
+        }
+
+        entity.Name = name;
+        entity.Direction = RuleDirection.MoneyOut;
+        entity.TransactionType = RuleTransactionType.CreditCardPayment;
+        entity.CategoryId = null;
+        entity.CategoryName = destinationAccount.Trim();
+        entity.Payee = NullIfWhiteSpace(payee);
+        entity.MatchAllConditions = conditionLogic == "all";
+        entity.AutoAdd = autoAdd;
+        entity.IsAccountSpecific = true;
+        entity.IsReadOnlyImport = false;
+        entity.OriginalConditionsJson = null;
+        entity.OriginalOutputsJson = null;
+        entity.Conditions = conditions.Select(x => new RuleCondition
+        {
+            Field = x.Field,
+            Operator = x.Operator,
+            Value = x.Value.Trim()
+        }).ToList();
+        entity.ModifiedUtc = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+        Navigation.NavigateTo($"/clients/{ClientId}/rules");
+    }
+
+    private void ReturnToClient() =>
+        Navigation.NavigateTo($"/clients/{ClientId}/rules");
+
+    private void SetError(string value)
+    {
+        message = value;
+        isError = true;
+    }
+
+    private static RuleCondition NewCondition() => new()
+    {
+        Field = RuleMatchField.BankText,
+        Operator = RuleMatchOperator.Contains
+    };
+
+    private static string? NullIfWhiteSpace(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static string FormatOperator(RuleMatchOperator op) => op switch
+    {
+        RuleMatchOperator.DoesNotContain => "Doesn't contain",
+        RuleMatchOperator.DoesNotEqual => "Doesn't equal",
+        RuleMatchOperator.GreaterThan => "Greater than",
+        RuleMatchOperator.LessThan => "Less than",
+        _ => op.ToString()
+    };
+}
