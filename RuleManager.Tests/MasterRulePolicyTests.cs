@@ -6,15 +6,18 @@ namespace RuleManager.Tests;
 public class MasterRulePolicyTests
 {
     [Fact]
-    public void MoneyOut_AllowsExpenseTransferAndCheck()
+    public void MoneyOut_AllowsExpenseTransferCheckAndCreditCardPayment()
     {
         var allowed = MasterRulePolicy.GetAllowedTransactionTypes(RuleDirection.MoneyOut);
 
         Assert.Contains(RuleTransactionType.Expense, allowed);
         Assert.Contains(RuleTransactionType.Transfer, allowed);
         Assert.Contains(RuleTransactionType.Check, allowed);
+        Assert.Contains(RuleTransactionType.CreditCardPayment, allowed);
         Assert.DoesNotContain(RuleTransactionType.Deposit, allowed);
-        Assert.DoesNotContain(RuleTransactionType.CreditCardPayment, allowed);
+        Assert.True(MasterRulePolicy.CanCreate(
+            RuleDirection.MoneyOut,
+            RuleTransactionType.CreditCardPayment));
     }
 
     [Fact]
