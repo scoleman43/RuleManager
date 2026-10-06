@@ -46,12 +46,18 @@ public sealed class QuickBooksChartOfAccountsImportService(
 
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
 
-        var clientExists = await db.Clients.AnyAsync(x => x.Id == clientId, cancellationToken);
-        if (!clientExists)
+        var client = await db.Clients
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == clientId, cancellationToken);
+        if (client is null)
             throw new InvalidOperationException("The selected client no longer exists.");
 
         var existing = await db.ClientReferences
             .Where(x => x.ClientId == clientId)
+            .ToListAsync(cancellationToken);
+
+        var organizationCategories = await db.Categories
+            .Where(x => x.OrganizationId == client.OrganizationId)
             .ToListAsync(cancellationToken);
 
         var added = 0;
@@ -69,9 +75,32 @@ public sealed class QuickBooksChartOfAccountsImportService(
 
             totalRows++;
 
-            var type = IsBankOrCreditCard(accountType)
+            var isBankOrCreditCard = IsBankOrCreditCard(accountType);
+            var type = isBankOrCreditCard
                 ? ClientReferenceType.Account
                 : ClientReferenceType.Category;
+
+            if (!isBankOrCreditCard)
+            {
+                var globalCategory = organizationCategories.FirstOrDefault(x =>
+                    string.Equals(x.Name, name, StringComparison.OrdinalIgnoreCase));
+
+                if (globalCategory is null)
+                {
+                    globalCategory = new Category
+                    {
+                        OrganizationId = client.OrganizationId,
+                        Name = name
+                    };
+                    db.Categories.Add(globalCategory);
+                    organizationCategories.Add(globalCategory);
+                }
+                else if (!globalCategory.IsActive)
+                {
+                    globalCategory.IsActive = true;
+                    globalCategory.ModifiedUtc = DateTime.UtcNow;
+                }
+            }
 
             var match = existing.FirstOrDefault(x =>
                 x.Type == type
