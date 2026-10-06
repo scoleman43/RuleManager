@@ -131,9 +131,7 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
     {
         error = null;
 
-        if (rule.IsReadOnlyImport
-            || rule.IsAccountSpecific
-            || rule.TransactionType == RuleTransactionType.CreditCardPayment)
+        if (rule.IsReadOnlyImport)
         {
             if (!string.IsNullOrWhiteSpace(rule.OriginalConditionsJson)
                 && !string.IsNullOrWhiteSpace(rule.OriginalOutputsJson))
@@ -144,7 +142,14 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
                     rule.OriginalOutputsJson);
             }
 
-            error = "This imported account-specific/read-only rule does not have its original QuickBooks JSON.";
+            error = "This imported read-only rule does not have its original QuickBooks JSON.";
+            return null;
+        }
+
+        if (rule.TransactionType == RuleTransactionType.CreditCardPayment
+            && rule.Direction != RuleDirection.MoneyOut)
+        {
+            error = "Credit card payment export is verified only for Money out rules.";
             return null;
         }
 
@@ -323,6 +328,7 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
         RuleTransactionType.Deposit when rule.Direction == RuleDirection.MoneyIn => null,
         RuleTransactionType.Check when rule.Direction == RuleDirection.MoneyOut => "3",
         RuleTransactionType.Transfer => "26",
+        RuleTransactionType.CreditCardPayment when rule.Direction == RuleDirection.MoneyOut => "64",
         _ => null
     };
 
