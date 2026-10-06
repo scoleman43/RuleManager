@@ -67,6 +67,9 @@ public sealed class QuickBooksChartOfAccountsImportService(
         foreach (var row in rows.Skip(1))
         {
             var name = Cell(row, headers["Account name"]);
+            var accountNumber = headers.TryGetValue("Account number", out var accountNumberIndex)
+                ? Cell(row, accountNumberIndex)
+                : string.Empty;
             var accountType = Cell(row, headers["Account type"]);
             var detailType = Cell(row, headers["Detail type"]);
 
@@ -113,6 +116,7 @@ public sealed class QuickBooksChartOfAccountsImportService(
                     ClientId = clientId,
                     Type = type,
                     Name = name,
+                    QuickBooksAccountNumber = NullIfWhiteSpace(accountNumber),
                     QuickBooksAccountType = NullIfWhiteSpace(accountType),
                     QuickBooksDetailType = NullIfWhiteSpace(detailType),
                     Source = ClientReferenceSource.ChartOfAccountsImport,
@@ -126,6 +130,7 @@ public sealed class QuickBooksChartOfAccountsImportService(
             else
             {
                 match.Name = name;
+                match.QuickBooksAccountNumber = NullIfWhiteSpace(accountNumber);
                 match.QuickBooksAccountType = NullIfWhiteSpace(accountType);
                 match.QuickBooksDetailType = NullIfWhiteSpace(detailType);
                 match.Source = ClientReferenceSource.ChartOfAccountsImport;
