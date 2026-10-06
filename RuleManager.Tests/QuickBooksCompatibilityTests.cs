@@ -763,6 +763,116 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Export_AppliesClientCategoryAndPayeeMapping()
+    {
+        var factory = CreateFactory(nameof(Export_AppliesClientCategoryAndPayeeMapping));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            var rule = new MasterRule
+            {
+                OrganizationId = organizationId,
+                Name = "Mapped reusable",
+                Direction = RuleDirection.MoneyOut,
+                TransactionType = RuleTransactionType.Expense,
+                CategoryName = "Office Supplies",
+                Payee = "Staples",
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.BankText,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "STAPLES"
+                    }
+                }
+            };
+
+            db.MasterRules.Add(rule);
+
+            var assignment = new ClientRuleAssignment
+            {
+                ClientId = clientId,
+                MasterRuleId = rule.Id,
+                IsExplicit = true,
+                ExportPriority = 1
+            };
+
+            db.ClientRuleAssignments.Add(assignment);
+            db.RuleOverrides.Add(new RuleOverride
+            {
+                ClientRuleAssignmentId = assignment.Id,
+                Reason = "Client QuickBooks reference mapping",
+                OverrideJson = ClientRuleReferenceService.WriteMapping(
+                    "Office & General Administrative Expenses",
+                    "Staples Inc.")
+            });
+
+            await db.SaveChangesAsync();
+        }
+
+        var service = new QuickBooksRuleExportService(factory);
+        var result = await service.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Contains("\"value\":\"Office & General Administrative Expenses\"", row.GetCell(2).StringCellValue);
+        Assert.Contains("\"value\":\"Staples Inc.\"", row.GetCell(2).StringCellValue);
+        Assert.DoesNotContain("\"value\":\"Office Supplies\"", row.GetCell(2).StringCellValue);
+    }
+
+    [Fact]
+    public void ClientReferenceValidation_UsesClientCatalogAndMapping()
+    {
+        var rule = new MasterRule
+        {
+            Name = "Reusable",
+            CategoryName = "Office Supplies",
+            Payee = "Staples"
+        };
+
+        var references = new List<ClientReference>
+        {
+            new()
+            {
+                Type = ClientReferenceType.Category,
+                Name = "Office & General Administrative Expenses",
+                Source = ClientReferenceSource.ChartOfAccountsImport,
+                IsActive = true
+            },
+            new()
+            {
+                Type = ClientReferenceType.Payee,
+                Name = "Staples Inc.",
+                Source = ClientReferenceSource.VendorImport,
+                IsActive = true
+            }
+        };
+
+        var before = ClientRuleReferenceService.Validate(rule, null, references);
+        Assert.False(before.IsReady);
+        Assert.False(before.CategoryReady);
+        Assert.False(before.PayeeReady);
+
+        var ruleOverride = new RuleOverride
+        {
+            OverrideJson = ClientRuleReferenceService.WriteMapping(
+                "Office & General Administrative Expenses",
+                "Staples Inc.")
+        };
+
+        var after = ClientRuleReferenceService.Validate(rule, ruleOverride, references);
+        Assert.True(after.IsReady);
+        Assert.True(after.CategoryReady);
+        Assert.True(after.PayeeReady);
+    }
+
+    [Fact]
     public async Task Export_GeneratesVerifiedMoneyInCreditCardPaymentJson()
     {
         var factory = CreateFactory(nameof(Export_GeneratesVerifiedMoneyInCreditCardPaymentJson));
