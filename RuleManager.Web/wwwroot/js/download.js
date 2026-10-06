@@ -1,6 +1,6 @@
-window.downloadFileFromStream = async (fileName, contentStreamReference) => {
+window.downloadFileFromStream = async (fileName, contentStreamReference, contentType = "application/vnd.ms-excel") => {
     const arrayBuffer = await contentStreamReference.arrayBuffer();
-    const blob = new Blob([arrayBuffer], { type: "application/vnd.ms-excel" });
+    const blob = new Blob([arrayBuffer], { type: contentType });
     const url = URL.createObjectURL(blob);
 
     const anchor = document.createElement("a");
