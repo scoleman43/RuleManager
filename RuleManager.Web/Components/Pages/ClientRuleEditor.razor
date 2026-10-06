@@ -402,17 +402,11 @@ else
         entity.IsAccountSpecific = true;
         entity.IsReadOnlyImport = false;
 
-        if (ClientRuleId.HasValue)
-        {
-            entity.IsModifiedSinceImport =
-                !string.IsNullOrWhiteSpace(entity.ImportedQuickBooksRuleName)
-                || !string.IsNullOrWhiteSpace(entity.SourceImportKey)
-                || entity.IsModifiedSinceImport;
-        }
-        else
+        if (!ClientRuleId.HasValue)
         {
             entity.SourceImportKey = null;
             entity.ImportedQuickBooksRuleName = null;
+            entity.ImportedBaselineJson = null;
             entity.IsModifiedSinceImport = false;
         }
 
@@ -425,6 +419,14 @@ else
             Value = x.Value.Trim()
         }).ToList();
         entity.ModifiedUtc = DateTime.UtcNow;
+
+        if (ClientRuleId.HasValue
+            && !string.IsNullOrWhiteSpace(entity.ImportedQuickBooksRuleName)
+            && !string.IsNullOrWhiteSpace(entity.ImportedBaselineJson))
+        {
+            entity.IsModifiedSinceImport =
+                !RuleImportSnapshot.MatchesBaseline(entity);
+        }
 
         await db.SaveChangesAsync();
         Navigation.NavigateTo($"/clients/{ClientId}/rules");
