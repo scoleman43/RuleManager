@@ -384,6 +384,10 @@ else
                                         </td>
                                         <td>
                                             <strong>@rule.Name</strong>
+                                            @if (rule.IsModifiedSinceImport)
+                                            {
+                                                <span class="badge text-bg-warning ms-2">Changed since import</span>
+                                            }
                                             @if (!string.IsNullOrWhiteSpace(rule.Payee))
                                             {
                                                 <div class="small text-muted">Payee: @rule.Payee</div>
@@ -510,7 +514,13 @@ else
                                                    @onchange="e => SetExportPriorityAsync(exportRow, e)" />
                                         }
                                     </td>
-                                    <td><strong>@rule.Name</strong></td>
+                                    <td>
+                                        <strong>@rule.Name</strong>
+                                        @if (rule.IsModifiedSinceImport)
+                                        {
+                                            <span class="badge text-bg-warning ms-2">Changed since import</span>
+                                        }
+                                    </td>
                                     <td>@(rule.Direction == RuleDirection.MoneyOut ? "Money out" : "Money in")</td>
                                     <td>@FormatTransactionType(rule.TransactionType)</td>
                                     <td>@(rule.CategoryName ?? "—")</td>
