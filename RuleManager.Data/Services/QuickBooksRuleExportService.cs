@@ -32,6 +32,7 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
 
         var assignments = await db.ClientRuleAssignments
             .Where(x => x.ClientId == clientId)
+            .Include(x => x.Override)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
@@ -63,24 +64,37 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
         var assignmentPriority = assignments
             .ToDictionary(x => x.MasterRuleId, x => x.ExportPriority);
 
-        var orderedRules = new List<(RuleBase Rule, int Priority)>();
+        var assignmentByRuleId = assignments
+            .GroupBy(x => x.MasterRuleId)
+            .ToDictionary(x => x.Key, x => x.First());
+
+        var orderedRules = new List<(RuleBase Rule, int Priority, RuleOverride? Override)>();
 
         orderedRules.AddRange(clientSpecificRules.Select(rule =>
-            ((RuleBase)rule, rule.ExportPriority)));
+            ((RuleBase)rule, rule.ExportPriority, (RuleOverride?)null)));
 
         orderedRules.AddRange(rules
             .Where(rule => !clientSpecificNames.Contains(rule.Name))
             .Select(rule =>
-                ((RuleBase)rule,
-                 assignmentPriority.TryGetValue(rule.Id, out var priority)
-                    ? priority
-                    : int.MaxValue)));
+            {
+                assignmentByRuleId.TryGetValue(rule.Id, out var assignment);
+                return (
+                    (RuleBase)rule,
+                    assignmentPriority.TryGetValue(rule.Id, out var priority)
+                        ? priority
+                        : int.MaxValue,
+                    assignment?.Override);
+            }));
 
         foreach (var item in orderedRules
             .OrderBy(x => x.Priority)
             .ThenBy(x => x.Rule.Name))
         {
-            var row = BuildRow(item.Rule, out var error);
+            var effectiveRule = item.Rule is MasterRule masterRule
+                ? ApplyClientMapping(masterRule, item.Override)
+                : item.Rule;
+
+            var row = BuildRow(effectiveRule, out var error);
 
             if (row is null)
             {
@@ -125,6 +139,39 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             fileName,
             exportRows.Count,
             Array.Empty<string>());
+    }
+
+    private static RuleBase ApplyClientMapping(MasterRule rule, RuleOverride? ruleOverride)
+    {
+        var mapping = ClientRuleReferenceService.ReadMapping(ruleOverride);
+
+        return new MasterRule
+        {
+            Id = rule.Id,
+            OrganizationId = rule.OrganizationId,
+            Name = rule.Name,
+            Direction = rule.Direction,
+            MatchAllConditions = rule.MatchAllConditions,
+            Conditions = rule.Conditions.Select(x => new RuleCondition
+            {
+                Field = x.Field,
+                Operator = x.Operator,
+                Value = x.Value
+            }).ToList(),
+            TransactionType = rule.TransactionType,
+            CategoryId = rule.CategoryId,
+            CategoryName = mapping.CategoryName ?? rule.CategoryName,
+            Payee = mapping.Payee ?? rule.Payee,
+            AutoAdd = rule.AutoAdd,
+            OriginalConditionsJson = rule.OriginalConditionsJson,
+            OriginalOutputsJson = rule.OriginalOutputsJson,
+            ImportedQuickBooksRuleName = rule.ImportedQuickBooksRuleName,
+            ImportedBaselineJson = rule.ImportedBaselineJson,
+            IsModifiedSinceImport = rule.IsModifiedSinceImport,
+            IsAccountSpecific = rule.IsAccountSpecific,
+            IsReadOnlyImport = rule.IsReadOnlyImport,
+            IsActive = rule.IsActive
+        };
     }
 
     private static ExportRow? BuildRow(RuleBase rule, out string? error)
