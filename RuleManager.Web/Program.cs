@@ -17,6 +17,7 @@ builder.Services.AddDbContextFactory<RuleManagerDbContext>(options =>
 builder.Services.AddScoped<WorkspaceService>();
 builder.Services.AddScoped<RuleSetAssignmentService>();
 builder.Services.AddScoped<QuickBooksRuleImportService>();
+builder.Services.AddScoped<QuickBooksChartOfAccountsImportService>();
 builder.Services.AddScoped<QuickBooksRuleExportService>();
 
 var app = builder.Build();
