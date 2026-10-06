@@ -8,7 +8,8 @@ public static class MasterRulePolicy
     [
         RuleTransactionType.Expense,
         RuleTransactionType.Transfer,
-        RuleTransactionType.Check
+        RuleTransactionType.Check,
+        RuleTransactionType.CreditCardPayment
     ];
 
     private static readonly RuleTransactionType[] MoneyInTypes =
@@ -26,6 +27,5 @@ public static class MasterRulePolicy
             : [RuleMatchOperator.Contains, RuleMatchOperator.DoesNotContain, RuleMatchOperator.Equals, RuleMatchOperator.DoesNotEqual, RuleMatchOperator.StartsWith, RuleMatchOperator.EndsWith];
 
     public static bool CanCreate(RuleDirection direction, RuleTransactionType transactionType) =>
-        GetAllowedTransactionTypes(direction).Contains(transactionType)
-        && transactionType != RuleTransactionType.CreditCardPayment;
+        GetAllowedTransactionTypes(direction).Contains(transactionType);
 }
