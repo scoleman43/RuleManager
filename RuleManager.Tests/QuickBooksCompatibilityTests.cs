@@ -206,6 +206,58 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Import_DiscoversPerClientQuickBooksReferences()
+    {
+        var factory = CreateFactory(nameof(Import_DiscoversPerClientQuickBooksReferences));
+        var (organizationId, clientId) = await SeedClientAsync(factory);
+
+        using var workbook = BuildWorkbook(
+            ("Expense with payee",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"OFFICE\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Office Supplies\"},{\"actionType\":5,\"value\":\"TEST Vendor\"}]}"),
+            ("Transfer account",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"TRANSFER\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"Transfer Test\"},{\"actionType\":7,\"value\":\"26\"}]}"),
+            ("Card payment",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"CARD\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":0,\"value\":\"TEST Visa\"},{\"actionType\":7,\"value\":\"64\"}]}"),
+            ("Split",
+                "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"-1\"},{\"ruleType\":6,\"value\":\"SPLIT\"}],\"isAndRule\":true}",
+                "{\"ruleActions\":[{\"actionType\":6,\"value\":{\"actionInfoList\":[{\"categoryId\":\"Testing A\",\"splitValue\":\"50\",\"splitType\":\"percentage\"},{\"categoryId\":\"Testing B\",\"splitValue\":\"50\",\"splitType\":\"percentage\"}]}}]}"));
+
+        var service = new QuickBooksRuleImportService(factory);
+        var items = await service.AnalyzeAsync(organizationId, workbook);
+        await service.ApplyAsync(organizationId, items, clientId);
+
+        await using var db = await factory.CreateDbContextAsync();
+        var references = await db.ClientReferences
+            .Where(x => x.ClientId == clientId)
+            .OrderBy(x => x.Type)
+            .ThenBy(x => x.Name)
+            .ToListAsync();
+
+        Assert.Contains(references, x =>
+            x.Type == ClientReferenceType.Category
+            && x.Name == "Office Supplies"
+            && x.Source == ClientReferenceSource.Imported);
+        Assert.Contains(references, x =>
+            x.Type == ClientReferenceType.Payee
+            && x.Name == "TEST Vendor");
+        Assert.Contains(references, x =>
+            x.Type == ClientReferenceType.Account
+            && x.Name == "Transfer Test");
+        Assert.Contains(references, x =>
+            x.Type == ClientReferenceType.Account
+            && x.Name == "TEST Visa");
+        Assert.Contains(references, x =>
+            x.Type == ClientReferenceType.Category
+            && x.Name == "Testing A");
+        Assert.Contains(references, x =>
+            x.Type == ClientReferenceType.Category
+            && x.Name == "Testing B");
+    }
+
+    [Fact]
     public async Task Export_GeneratesVerifiedBankTextAmountAndPayeeJson()
     {
         var factory = CreateFactory(nameof(Export_GeneratesVerifiedBankTextAmountAndPayeeJson));
