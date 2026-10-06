@@ -262,6 +262,8 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             }).ToList();
             entity.OriginalConditionsJson = item.OriginalConditionsJson;
             entity.OriginalOutputsJson = item.OriginalOutputsJson;
+            entity.ImportedQuickBooksRuleName = item.Name;
+            entity.IsModifiedSinceImport = false;
             entity.IsAccountSpecific = false;
             entity.IsReadOnlyImport = item.IsReadOnlyImport;
             entity.IsActive = true;
@@ -321,6 +323,8 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
                 }).ToList();
                 entity.OriginalConditionsJson = item.OriginalConditionsJson;
                 entity.OriginalOutputsJson = item.OriginalOutputsJson;
+                entity.ImportedQuickBooksRuleName = item.Name;
+                entity.IsModifiedSinceImport = false;
                 entity.IsAccountSpecific = true;
                 entity.IsReadOnlyImport = true;
                 entity.ModifiedUtc = DateTime.UtcNow;
