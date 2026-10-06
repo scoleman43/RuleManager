@@ -793,7 +793,14 @@ else
             db.MasterRules.Add(masterEntity);
         }
 
+        var hadQuickBooksImportProvenance =
+            !string.IsNullOrWhiteSpace(masterEntity.ImportedQuickBooksRuleName);
+
         ApplyFormValues(masterEntity, name, selectedCategoryId, selectedCategoryName, splitDefinition);
+
+        if (hadQuickBooksImportProvenance)
+            masterEntity.IsModifiedSinceImport = true;
+
         await db.SaveChangesAsync();
 
         if (IsClone)
