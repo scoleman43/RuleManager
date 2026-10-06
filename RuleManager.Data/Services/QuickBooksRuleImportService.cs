@@ -407,7 +407,7 @@ public sealed class QuickBooksRuleImportService(IDbContextFactory<RuleManagerDbC
             else
             {
                 match.IsActive = true;
-                if (match.Source != ClientReferenceSource.ApiVerified)
+                if (match.Source is ClientReferenceSource.Imported or ClientReferenceSource.ManualOverride)
                     match.Source = ClientReferenceSource.Imported;
                 match.ModifiedUtc = DateTime.UtcNow;
             }
