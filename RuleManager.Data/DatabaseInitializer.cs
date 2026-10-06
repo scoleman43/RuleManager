@@ -24,6 +24,37 @@ public static class DatabaseInitializer
             cancellationToken);
 
         await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "MasterRules" ADD COLUMN IF NOT EXISTS "ImportedQuickBooksRuleName" character varying(255);""",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "MasterRules" ADD COLUMN IF NOT EXISTS "IsModifiedSinceImport" boolean NOT NULL DEFAULT FALSE;""",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "ClientRules" ADD COLUMN IF NOT EXISTS "ImportedQuickBooksRuleName" character varying(255);""",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "ClientRules" ADD COLUMN IF NOT EXISTS "IsModifiedSinceImport" boolean NOT NULL DEFAULT FALSE;""",
+            cancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE "MasterRules"
+            SET "ImportedQuickBooksRuleName" = "Name"
+            WHERE "ImportedQuickBooksRuleName" IS NULL
+              AND ("OriginalConditionsJson" IS NOT NULL OR "OriginalOutputsJson" IS NOT NULL);
+            """,
+            cancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            UPDATE "ClientRules"
+            SET "ImportedQuickBooksRuleName" = COALESCE("SourceImportKey", "Name")
+            WHERE "ImportedQuickBooksRuleName" IS NULL
+              AND ("SourceImportKey" IS NOT NULL OR "OriginalConditionsJson" IS NOT NULL OR "OriginalOutputsJson" IS NOT NULL);
+            """,
+            cancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync(
             """
             CREATE TABLE IF NOT EXISTS "ClientReferences" (
                 "Id" uuid NOT NULL,
