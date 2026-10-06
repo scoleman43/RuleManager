@@ -8,6 +8,7 @@ public sealed class RuleManagerDbContext(DbContextOptions<RuleManagerDbContext> 
     public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Category> Categories => Set<Category>();
+    public DbSet<ClientReference> ClientReferences => Set<ClientReference>();
     public DbSet<MasterRule> MasterRules => Set<MasterRule>();
     public DbSet<ClientRule> ClientRules => Set<ClientRule>();
     public DbSet<RuleSet> RuleSets => Set<RuleSet>();
@@ -24,12 +25,17 @@ public sealed class RuleManagerDbContext(DbContextOptions<RuleManagerDbContext> 
         modelBuilder.Entity<Organization>().Property(x => x.Name).HasMaxLength(200).IsRequired();
         modelBuilder.Entity<Client>().Property(x => x.Name).HasMaxLength(200).IsRequired();
         modelBuilder.Entity<Category>().Property(x => x.Name).HasMaxLength(255).IsRequired();
+        modelBuilder.Entity<ClientReference>().Property(x => x.Name).HasMaxLength(255).IsRequired();
         modelBuilder.Entity<MasterRule>().Property(x => x.Name).HasMaxLength(255).IsRequired();
         modelBuilder.Entity<ClientRule>().Property(x => x.Name).HasMaxLength(255).IsRequired();
         modelBuilder.Entity<RuleSet>().Property(x => x.Name).HasMaxLength(200).IsRequired();
 
         modelBuilder.Entity<Category>()
             .HasIndex(x => new { x.OrganizationId, x.Name })
+            .IsUnique();
+
+        modelBuilder.Entity<ClientReference>()
+            .HasIndex(x => new { x.ClientId, x.Type, x.Name })
             .IsUnique();
 
         modelBuilder.Entity<RuleSetRule>()
