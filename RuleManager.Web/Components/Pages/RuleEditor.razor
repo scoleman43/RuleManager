@@ -98,7 +98,7 @@ else
 
                 <div class="col-md-3">
                     <label class="form-label">Transaction type</label>
-                    <select class="form-select" @bind="transactionType" disabled="@isSplitRule">
+                    <select class="form-select" value="@transactionType" @onchange="TransactionTypeChanged" disabled="@isSplitRule">
                         @foreach (var type in AllowedTransactionTypes)
                         {
                             <option value="@type">@FormatTransactionType(type)</option>
@@ -106,62 +106,114 @@ else
                     </select>
                 </div>
 
-                <div class="col-md-6">
-                    <label class="form-label d-block">Rule output</label>
-                    <div class="form-check mt-2">
-                        <input class="form-check-input"
-                               type="checkbox"
-                               checked="@isSplitRule"
-                               @onchange="SplitRuleChanged"
-                               id="splitRule" />
-                        <label class="form-check-label" for="splitRule">Split transaction across multiple categories</label>
+                @if (!IsCreditCardPayment)
+                {
+                    <div class="col-md-6">
+                        <label class="form-label d-block">Rule output</label>
+                        <div class="form-check mt-2">
+                            <input class="form-check-input"
+                                   type="checkbox"
+                                   checked="@isSplitRule"
+                                   @onchange="SplitRuleChanged"
+                                   id="splitRule" />
+                            <label class="form-check-label" for="splitRule">Split transaction across multiple categories</label>
+                        </div>
+                        @if (isSplitRule)
+                        {
+                            <div class="form-text">Verified QuickBooks split export currently supports Money out / Expense rules.</div>
+                        }
                     </div>
-                    @if (isSplitRule)
-                    {
-                        <div class="form-text">Verified QuickBooks split export currently supports Money out / Expense rules.</div>
-                    }
-                </div>
+                }
 
                 @if (!isSplitRule)
                 {
-                    <div class="col-md-6">
-                        <label class="form-label">Category</label>
-                        <div class="input-group">
-                            <select class="form-select" @bind="categoryId">
-                                <option value="">-- Select category --</option>
-                                @foreach (var category in CategoryOptions)
+                    @if (IsCreditCardPayment)
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label">Client</label>
+                            <select class="form-select" value="@selectedCreditCardClientId" @onchange="CreditCardClientChangedAsync">
+                                <option value="">-- Select client --</option>
+                                @foreach (var option in activeClients)
                                 {
-                                    <option value="@category.Id">@category.Name</option>
+                                    <option value="@option.Id">@option.Name</option>
                                 }
                             </select>
-                            <button class="btn btn-outline-secondary" type="button" @onclick="ToggleCategoryOverride">
-                                @(showCategoryOverride ? "Cancel" : "Add Override")
-                            </button>
-                        </div>
-                        <div class="form-text">
-                            @(clientHasChartOfAccounts
-                                ? "Using categories from this client's imported QuickBooks Chart of Accounts."
-                                : "Using the global category pool. Import this client's QuickBooks Chart of Accounts to use its client-specific category list.")
+                            <div class="form-text">Credit card payment rules are client-specific because the credit card account belongs to one QuickBooks company.</div>
                         </div>
 
-                        @if (showCategoryOverride)
-                        {
-                            <div class="alert alert-warning mt-2 mb-0">
-                                <strong>Override only:</strong> RuleManager cannot create categories in QuickBooks.
-                                The category must already exist in QBO and the name must match exactly.
-                                QuickBooks may require manual mapping during import, so verify the imported rule afterward.
-                                <div class="input-group mt-2">
-                                    <input class="form-control" @bind="overrideCategoryName" placeholder="Exact QuickBooks category name" />
-                                    <button class="btn btn-warning" type="button" @onclick="CreateCategoryOverrideAsync">Add Override</button>
-                                </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Credit card</label>
+                            <select class="form-select" @bind="creditCardAccountName" disabled="@(!CreditCardAccountOptions.Any())">
+                                <option value="">-- Select credit card --</option>
+                                @foreach (var account in CreditCardAccountOptions)
+                                {
+                                    <option value="@account">@account</option>
+                                }
+                            </select>
+                            <div class="form-text">
+                                @(string.IsNullOrWhiteSpace(selectedCreditCardClientId)
+                                    ? "Select a client first."
+                                    : CreditCardAccountOptions.Any()
+                                        ? "Credit cards come from the selected client's imported QuickBooks Chart of Accounts."
+                                        : "No credit card accounts are available. Import the selected client's QuickBooks Chart of Accounts first.")
                             </div>
-                        }
-                    </div>
+                        </div>
 
-                    <div class="col-md-6">
-                        <label class="form-label">Payee</label>
-                        <input class="form-control" @bind="payee" />
-                    </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Payee</label>
+                            <select class="form-select" @bind="payee" disabled="@string.IsNullOrWhiteSpace(selectedCreditCardClientId)">
+                                <option value="">-- No payee --</option>
+                                @foreach (var option in CreditCardPayeeOptions)
+                                {
+                                    <option value="@option">@option</option>
+                                }
+                            </select>
+                            <div class="form-text">
+                                Payees come from the selected client's imported QuickBooks Vendor list and learned rule references.
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="col-md-6">
+                            <label class="form-label">Category</label>
+                            <div class="input-group">
+                                <select class="form-select" @bind="categoryId">
+                                    <option value="">-- Select category --</option>
+                                    @foreach (var category in CategoryOptions)
+                                    {
+                                        <option value="@category.Id">@category.Name</option>
+                                    }
+                                </select>
+                                <button class="btn btn-outline-secondary" type="button" @onclick="ToggleCategoryOverride">
+                                    @(showCategoryOverride ? "Cancel" : "Add Override")
+                                </button>
+                            </div>
+                            <div class="form-text">
+                                @(clientHasChartOfAccounts
+                                    ? "Using categories from this client's imported QuickBooks Chart of Accounts."
+                                    : "Using the global category pool. Import this client's QuickBooks Chart of Accounts to use its client-specific category list.")
+                            </div>
+
+                            @if (showCategoryOverride)
+                            {
+                                <div class="alert alert-warning mt-2 mb-0">
+                                    <strong>Override only:</strong> RuleManager cannot create categories in QuickBooks.
+                                    The category must already exist in QBO and the name must match exactly.
+                                    QuickBooks may require manual mapping during import, so verify the imported rule afterward.
+                                    <div class="input-group mt-2">
+                                        <input class="form-control" @bind="overrideCategoryName" placeholder="Exact QuickBooks category name" />
+                                        <button class="btn btn-warning" type="button" @onclick="CreateCategoryOverrideAsync">Add Override</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Payee</label>
+                            <input class="form-control" @bind="payee" />
+                        </div>
+                    }
                 }
 
                 <div class="col-md-6">
@@ -324,6 +376,7 @@ else
     private Guid organizationId;
     private readonly List<Category> categories = new();
     private readonly List<ClientReference> clientCategoryReferences = new();
+    private readonly List<ClientReference> creditCardClientReferences = new();
     private readonly List<Client> activeClients = new();
     private readonly List<RuleSet> activeRuleSets = new();
     private readonly List<RuleCondition> conditions = new();
@@ -345,6 +398,8 @@ else
     private bool isSplitRule;
     private string selectedCloneClientId = string.Empty;
     private string selectedCloneRuleSetId = string.Empty;
+    private string selectedCreditCardClientId = string.Empty;
+    private string creditCardAccountName = string.Empty;
     private QuickBooksSplitType splitType = QuickBooksSplitType.Percentage;
     private readonly List<QuickBooksSplitLine> splitLines = new();
 
@@ -359,8 +414,29 @@ else
         ? "Create a new reusable rule from an existing rule, then choose where it should be assigned."
         : "Create or update a reusable rule.";
 
+    private bool IsCreditCardPayment =>
+        transactionType == RuleTransactionType.CreditCardPayment;
+
     private IReadOnlyList<RuleTransactionType> AllowedTransactionTypes =>
-        MasterRulePolicy.GetAllowedTransactionTypes(direction);
+        MasterRulePolicy.GetAllowedTransactionTypes(direction)
+            .Where(x => x != RuleTransactionType.CreditCardPayment || (!RuleId.HasValue && !IsClone))
+            .ToList();
+
+    private IEnumerable<string> CreditCardAccountOptions =>
+        creditCardClientReferences
+            .Where(x => x.Type == ClientReferenceType.Account
+                && x.IsActive
+                && string.Equals(x.QuickBooksAccountType, "Credit Card", StringComparison.OrdinalIgnoreCase))
+            .Select(x => x.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<string> CreditCardPayeeOptions =>
+        creditCardClientReferences
+            .Where(x => x.Type == ClientReferenceType.Payee && x.IsActive)
+            .Select(x => x.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
 
     private IEnumerable<Category> CategoryOptions
     {
@@ -551,6 +627,9 @@ else
         isSplitRule = false;
         selectedCloneClientId = string.Empty;
         selectedCloneRuleSetId = string.Empty;
+        selectedCreditCardClientId = string.Empty;
+        creditCardAccountName = string.Empty;
+        creditCardClientReferences.Clear();
         splitType = QuickBooksSplitType.Percentage;
         splitLines.Clear();
 
@@ -725,6 +804,43 @@ else
         }).ToList()
     };
 
+    private async Task TransactionTypeChanged(ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<RuleTransactionType>(e.Value?.ToString(), out var parsed))
+            return;
+
+        transactionType = parsed;
+
+        if (IsCreditCardPayment)
+        {
+            direction = RuleDirection.MoneyOut;
+            isSplitRule = false;
+            categoryId = string.Empty;
+            payee = string.Empty;
+            selectedCreditCardClientId = string.Empty;
+            creditCardAccountName = string.Empty;
+            creditCardClientReferences.Clear();
+        }
+    }
+
+    private async Task CreditCardClientChangedAsync(ChangeEventArgs e)
+    {
+        selectedCreditCardClientId = e.Value?.ToString() ?? string.Empty;
+        creditCardAccountName = string.Empty;
+        payee = string.Empty;
+        creditCardClientReferences.Clear();
+
+        if (!Guid.TryParse(selectedCreditCardClientId, out var clientId))
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        creditCardClientReferences.AddRange(await db.ClientReferences
+            .Where(x => x.ClientId == clientId && x.IsActive)
+            .OrderBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+    }
+
     private void DirectionChanged(ChangeEventArgs e)
     {
         if (Enum.TryParse<RuleDirection>(e.Value?.ToString(), out var parsed))
@@ -772,6 +888,12 @@ else
         if (!MasterRulePolicy.CanCreate(direction, transactionType))
         {
             SetError("That transaction type is not valid for the selected money direction.");
+            return;
+        }
+
+        if (IsCreditCardPayment)
+        {
+            await SaveCreditCardPaymentRuleAsync(name);
             return;
         }
 
@@ -922,6 +1044,91 @@ else
         {
             Navigation.NavigateTo("/rules");
         }
+    }
+
+    private async Task SaveCreditCardPaymentRuleAsync(string name)
+    {
+        if (!Guid.TryParse(selectedCreditCardClientId, out var clientId))
+        {
+            SetError("Select the client for this credit card payment rule.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(creditCardAccountName))
+        {
+            SetError("Select the credit card account.");
+            return;
+        }
+
+        if (!CreditCardAccountOptions.Contains(creditCardAccountName, StringComparer.OrdinalIgnoreCase))
+        {
+            SetError("The selected credit card is not available in this client's imported Chart of Accounts.");
+            return;
+        }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        var duplicateClientRule = await db.ClientRules.AnyAsync(x =>
+            x.ClientId == clientId && x.Name.ToLower() == name.ToLower());
+
+        if (duplicateClientRule)
+        {
+            SetError($"A client-specific rule named '{name}' already exists for the selected client.");
+            return;
+        }
+
+        var assignedRuleIds = await db.ClientRuleAssignments
+            .Where(x => x.ClientId == clientId)
+            .Select(x => x.MasterRuleId)
+            .ToListAsync();
+
+        var duplicateReusableRule = await db.MasterRules.AnyAsync(x =>
+            assignedRuleIds.Contains(x.Id)
+            && x.IsActive
+            && x.Name.ToLower() == name.ToLower());
+
+        if (duplicateReusableRule)
+        {
+            SetError($"An assigned reusable rule named '{name}' already exists for the selected client. Use a unique QuickBooks rule name.");
+            return;
+        }
+
+        var assignmentMax = await db.ClientRuleAssignments
+            .Where(x => x.ClientId == clientId)
+            .Select(x => (int?)x.ExportPriority)
+            .MaxAsync() ?? 0;
+
+        var clientRuleMax = await db.ClientRules
+            .Where(x => x.ClientId == clientId)
+            .Select(x => (int?)x.ExportPriority)
+            .MaxAsync() ?? 0;
+
+        var entity = new ClientRule
+        {
+            ClientId = clientId,
+            Name = name,
+            Direction = RuleDirection.MoneyOut,
+            TransactionType = RuleTransactionType.CreditCardPayment,
+            CategoryName = creditCardAccountName.Trim(),
+            Payee = NullIfWhiteSpace(payee),
+            MatchAllConditions = conditionLogic == "all",
+            AutoAdd = autoAdd,
+            IsAccountSpecific = true,
+            IsReadOnlyImport = false,
+            IsModifiedSinceImport = false,
+            ExportPriority = Math.Max(assignmentMax, clientRuleMax) + 1,
+            Conditions = conditions.Select(x => new RuleCondition
+            {
+                Field = x.Field,
+                Operator = x.Operator,
+                Value = x.Value.Trim()
+            }).ToList()
+        };
+
+        db.ClientRules.Add(entity);
+        await db.SaveChangesAsync();
+
+        Navigation.NavigateTo($"/clients/{clientId}/rules");
     }
 
     private void ApplyFormValues(
