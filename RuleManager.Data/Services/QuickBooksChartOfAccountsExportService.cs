@@ -14,6 +14,7 @@ public sealed class QuickBooksChartOfAccountsExportService(
 {
     public async Task<QuickBooksChartOfAccountsExportResult> GenerateAsync(
         Guid clientId,
+        string? outputClientName = null,
         CancellationToken cancellationToken = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
@@ -52,7 +53,8 @@ public sealed class QuickBooksChartOfAccountsExportService(
             csv.AppendLine();
         }
 
-        var safeName = SanitizeFileName(client.Name);
+        var safeName = SanitizeFileName(
+            string.IsNullOrWhiteSpace(outputClientName) ? client.Name : outputClientName);
         return new QuickBooksChartOfAccountsExportResult(
             new UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetBytes(csv.ToString()),
             $"{safeName}_Chart_of_Accounts_QBO_Import.csv",
