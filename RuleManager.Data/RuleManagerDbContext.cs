@@ -30,6 +30,8 @@ public sealed class RuleManagerDbContext(DbContextOptions<RuleManagerDbContext> 
         modelBuilder.Entity<ClientReference>().Property(x => x.QuickBooksDetailType).HasMaxLength(150);
         modelBuilder.Entity<MasterRule>().Property(x => x.Name).HasMaxLength(255).IsRequired();
         modelBuilder.Entity<ClientRule>().Property(x => x.Name).HasMaxLength(255).IsRequired();
+        modelBuilder.Entity<MasterRule>().Property(x => x.ImportedQuickBooksRuleName).HasMaxLength(255);
+        modelBuilder.Entity<ClientRule>().Property(x => x.ImportedQuickBooksRuleName).HasMaxLength(255);
         modelBuilder.Entity<RuleSet>().Property(x => x.Name).HasMaxLength(200).IsRequired();
 
         modelBuilder.Entity<Category>()
