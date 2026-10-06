@@ -353,14 +353,6 @@ else
                 }
             }
 
-            @if (IsCreditCardPayment && direction == RuleDirection.MoneyIn)
-            {
-                <div class="alert alert-warning mt-3 mb-0">
-                    Money in / Credit card payment can now be created in RuleManager using the client's bank-account list.
-                    The QBO XLS export mapping for this combination still needs to be verified with a native QuickBooks export before RuleManager will export it.
-                </div>
-            }
-
             @if (conditions.Any(x => x.Field == RuleMatchField.Amount) && direction == RuleDirection.MoneyIn)
             {
                 <div class="alert alert-warning mt-3 mb-0">
