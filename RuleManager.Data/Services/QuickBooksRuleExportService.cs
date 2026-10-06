@@ -146,13 +146,6 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             return null;
         }
 
-        if (rule.TransactionType == RuleTransactionType.CreditCardPayment
-            && rule.Direction != RuleDirection.MoneyOut)
-        {
-            error = "Credit card payment export is verified only for Money out rules.";
-            return null;
-        }
-
         var isSplitRule = QuickBooksSplitRuleCodec.TryParse(rule.OriginalOutputsJson, out var splitDefinition);
 
         if (!isSplitRule && string.IsNullOrWhiteSpace(rule.CategoryName))
@@ -328,7 +321,7 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
         RuleTransactionType.Deposit when rule.Direction == RuleDirection.MoneyIn => null,
         RuleTransactionType.Check when rule.Direction == RuleDirection.MoneyOut => "3",
         RuleTransactionType.Transfer => "26",
-        RuleTransactionType.CreditCardPayment when rule.Direction == RuleDirection.MoneyOut => "64",
+        RuleTransactionType.CreditCardPayment => "64",
         _ => null
     };
 
