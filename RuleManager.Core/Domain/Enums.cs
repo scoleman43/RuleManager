@@ -50,3 +50,18 @@ public enum BatchStatus
     Completed,
     Failed
 }
+
+
+public enum ClientReferenceType
+{
+    Category,
+    Payee,
+    Account
+}
+
+public enum ClientReferenceSource
+{
+    Imported,
+    ManualOverride,
+    ApiVerified
+}
