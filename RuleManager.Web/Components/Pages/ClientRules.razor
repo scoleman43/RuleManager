@@ -268,6 +268,79 @@ else
         </div>
     }
 
+    @if (MappingRule is not null)
+    {
+        <div class="rule-modal-backdrop" @onclick="CloseRuleMapping">
+            <div class="rule-modal-dialog" @onclick:stopPropagation="true">
+                <div class="rule-modal-header">
+                    <div>
+                        <div class="rule-modal-eyebrow">Client mapping</div>
+                        <h5 class="mb-1">@MappingRule.Name</h5>
+                        <div class="text-muted small">Map this reusable rule to names that exist in @client.Name's QuickBooks company.</div>
+                    </div>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="CloseRuleMapping">Close</button>
+                </div>
+
+                <div class="rule-modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label">Rule category</label>
+                            <input class="form-control" value="@(MappingRule.CategoryName ?? "—")" disabled />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Client category mapping</label>
+                            <select class="form-select" @bind="mappingCategoryName">
+                                <option value="">-- Use rule category --</option>
+                                @foreach (var option in MappingCategoryOptions)
+                                {
+                                    <option value="@option">@option</option>
+                                }
+                            </select>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label">Rule payee</label>
+                            <input class="form-control" value="@(MappingRule.Payee ?? "—")" disabled />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Client payee mapping</label>
+                            <select class="form-select" @bind="mappingPayee">
+                                <option value="">-- Use rule payee --</option>
+                                @foreach (var option in MappingPayeeOptions)
+                                {
+                                    <option value="@option">@option</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+
+                    @{
+                        var previewValidation = ClientRuleReferenceService.Validate(
+                            MappingRule,
+                            new RuleOverride
+                            {
+                                OverrideJson = ClientRuleReferenceService.WriteMapping(mappingCategoryName, mappingPayee)
+                            },
+                            clientReferences);
+                    }
+
+                    <div class="alert @(previewValidation.IsReady ? "alert-success" : "alert-warning") mt-3 mb-0">
+                        <strong>@(previewValidation.IsReady ? "Ready for this client" : "Needs review")</strong>
+                        <div class="small mt-1">@previewValidation.Summary</div>
+                    </div>
+                </div>
+
+                <div class="rule-modal-footer">
+                    <button class="btn btn-outline-danger" @onclick="ClearRuleMappingAsync">Clear Mapping</button>
+                    <div class="ms-auto d-flex gap-2">
+                        <button class="btn btn-outline-secondary" @onclick="CloseRuleMapping">Cancel</button>
+                        <button class="btn btn-primary" @onclick="SaveRuleMappingAsync">Save Mapping</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
     <div class="card">
         <button type="button"
                 class="btn text-start w-100 p-0 border-0"
@@ -367,6 +440,7 @@ else
                                     <th>Direction</th>
                                     <th>Transaction</th>
                                     <th>Category</th>
+                                    <th>QBO Match</th>
                                     <th>Auto Add</th>
                                     <th class="text-end" style="width: 120px;">Move</th>
                                     <th class="text-end">Action</th>
@@ -418,6 +492,22 @@ else
                                         <td>@FormatTransactionType(rule.TransactionType)</td>
                                         <td>@(rule.CategoryName ?? "—")</td>
                                         <td>
+                                            @{
+                                                var validation = ValidationFor(rule);
+                                            }
+                                            <span class="badge @(validation.IsReady ? "text-bg-success" : "text-bg-warning")">
+                                                @(validation.IsReady ? "Ready" : "Needs Review")
+                                            </span>
+                                            @if (AssignmentFor(rule.Id)?.Override is not null)
+                                            {
+                                                <div class="small text-muted mt-1">Client mapping applied</div>
+                                            }
+                                            @if (!validation.IsReady)
+                                            {
+                                                <div class="small text-muted mt-1">@validation.Summary</div>
+                                            }
+                                        </td>
+                                        <td>
                                             <span class="badge @(rule.AutoAdd ? "status-badge-active" : "status-badge-inactive")">
                                                 @(rule.AutoAdd ? "Yes" : "No")
                                             </span>
@@ -439,6 +529,9 @@ else
                                         </td>
                                         <td class="text-end">
                                             <div class="d-flex justify-content-end gap-2 flex-wrap">
+                                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenRuleMapping(rule.Id)">
+                                                    Map
+                                                </button>
                                                 @if (!rule.IsReadOnlyImport || QuickBooksSplitRuleCodec.IsSplitRule(rule.OriginalOutputsJson))
                                                 {
                                                     <button class="btn btn-sm btn-outline-primary" @onclick="() => CloneForClient(rule.Id)">
@@ -618,6 +711,9 @@ else
     private string directionFilter = "all";
     private string autoAddFilter = "all";
     private string categoryFilter = "all";
+    private Guid? mappingRuleId;
+    private string mappingCategoryName = string.Empty;
+    private string mappingPayee = string.Empty;
 
     private IEnumerable<RuleSet> AssignedRuleSets =>
         ruleSets.Where(x => assignedRuleSetIds.Contains(x.Id));
@@ -703,6 +799,31 @@ else
     private int CreditCardReferenceCount => clientReferences.Count(x =>
         string.Equals(x.QuickBooksAccountType, "Credit Card", StringComparison.OrdinalIgnoreCase));
 
+    private MasterRule? MappingRule =>
+        mappingRuleId.HasValue
+            ? masterRules.FirstOrDefault(x => x.Id == mappingRuleId.Value)
+            : null;
+
+    private IEnumerable<string> MappingCategoryOptions =>
+        clientReferences
+            .Where(x => x.IsActive && x.Type == ClientReferenceType.Category)
+            .Select(x => x.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
+
+    private IEnumerable<string> MappingPayeeOptions =>
+        clientReferences
+            .Where(x => x.IsActive && x.Type == ClientReferenceType.Payee)
+            .Select(x => x.Name)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(x => x, StringComparer.OrdinalIgnoreCase);
+
+    private ClientRuleReferenceValidation ValidationFor(MasterRule rule) =>
+        ClientRuleReferenceService.Validate(
+            rule,
+            AssignmentFor(rule.Id)?.Override,
+            clientReferences);
+
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -756,6 +877,7 @@ else
         assignments.Clear();
         assignments.AddRange(await db.ClientRuleAssignments
             .Where(x => x.ClientId == ClientId)
+            .Include(x => x.Override)
             .AsNoTracking()
             .ToListAsync());
 
@@ -954,6 +1076,86 @@ else
         {
             isVendorImportBusy = false;
         }
+    }
+
+    private void OpenRuleMapping(Guid ruleId)
+    {
+        mappingRuleId = ruleId;
+        var mapping = ClientRuleReferenceService.ReadMapping(AssignmentFor(ruleId)?.Override);
+        mappingCategoryName = mapping.CategoryName ?? string.Empty;
+        mappingPayee = mapping.Payee ?? string.Empty;
+    }
+
+    private void CloseRuleMapping()
+    {
+        mappingRuleId = null;
+        mappingCategoryName = string.Empty;
+        mappingPayee = string.Empty;
+    }
+
+    private async Task SaveRuleMappingAsync()
+    {
+        if (!mappingRuleId.HasValue)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var assignment = await db.ClientRuleAssignments
+            .Include(x => x.Override)
+            .SingleOrDefaultAsync(x =>
+                x.ClientId == ClientId
+                && x.MasterRuleId == mappingRuleId.Value);
+
+        if (assignment is null)
+        {
+            message = "The client assignment no longer exists.";
+            CloseRuleMapping();
+            return;
+        }
+
+        if (assignment.Override is null)
+        {
+            assignment.Override = new RuleOverride
+            {
+                ClientRuleAssignmentId = assignment.Id,
+                Reason = "Client QuickBooks reference mapping"
+            };
+        }
+
+        assignment.Override.OverrideJson =
+            ClientRuleReferenceService.WriteMapping(mappingCategoryName, mappingPayee);
+        assignment.Override.Reason = "Client QuickBooks reference mapping";
+        assignment.Override.ModifiedUtc = DateTime.UtcNow;
+        assignment.ModifiedUtc = DateTime.UtcNow;
+
+        await db.SaveChangesAsync();
+
+        message = $"Client mapping saved for '{MappingRule?.Name ?? "rule"}'.";
+        CloseRuleMapping();
+        await LoadAsync();
+    }
+
+    private async Task ClearRuleMappingAsync()
+    {
+        if (!mappingRuleId.HasValue)
+            return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var assignment = await db.ClientRuleAssignments
+            .Include(x => x.Override)
+            .SingleOrDefaultAsync(x =>
+                x.ClientId == ClientId
+                && x.MasterRuleId == mappingRuleId.Value);
+
+        if (assignment?.Override is not null)
+        {
+            db.RuleOverrides.Remove(assignment.Override);
+            assignment.ModifiedUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+        }
+
+        message = $"Client mapping cleared for '{MappingRule?.Name ?? "rule"}'.";
+        CloseRuleMapping();
+        await LoadAsync();
     }
 
     private void BackToClients() => Navigation.NavigateTo("/clients");
