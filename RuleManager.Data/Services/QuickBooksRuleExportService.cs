@@ -32,9 +32,14 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
 
         var assignments = await db.ClientRuleAssignments
             .Where(x => x.ClientId == clientId)
-            .Include(x => x.Override)
             .AsNoTracking()
             .ToListAsync(cancellationToken);
+
+        var assignmentIds = assignments.Select(x => x.Id).ToArray();
+        var overridesByAssignmentId = await db.RuleOverrides
+            .Where(x => assignmentIds.Contains(x.ClientRuleAssignmentId))
+            .AsNoTracking()
+            .ToDictionaryAsync(x => x.ClientRuleAssignmentId, cancellationToken);
 
         var assignedRuleIds = assignments
             .Select(x => x.MasterRuleId)
@@ -78,12 +83,16 @@ public sealed class QuickBooksRuleExportService(IDbContextFactory<RuleManagerDbC
             .Select(rule =>
             {
                 assignmentByRuleId.TryGetValue(rule.Id, out var assignment);
+                RuleOverride? ruleOverride = null;
+                if (assignment is not null)
+                    overridesByAssignmentId.TryGetValue(assignment.Id, out ruleOverride);
+
                 return (
                     (RuleBase)rule,
                     assignmentPriority.TryGetValue(rule.Id, out var priority)
                         ? priority
                         : int.MaxValue,
-                    assignment?.Override);
+                    ruleOverride);
             }));
 
         foreach (var item in orderedRules
