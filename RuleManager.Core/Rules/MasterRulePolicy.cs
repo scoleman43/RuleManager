@@ -15,7 +15,8 @@ public static class MasterRulePolicy
     private static readonly RuleTransactionType[] MoneyInTypes =
     [
         RuleTransactionType.Deposit,
-        RuleTransactionType.Transfer
+        RuleTransactionType.Transfer,
+        RuleTransactionType.CreditCardPayment
     ];
 
     public static IReadOnlyList<RuleTransactionType> GetAllowedTransactionTypes(RuleDirection direction) =>
