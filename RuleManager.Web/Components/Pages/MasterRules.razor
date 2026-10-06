@@ -311,6 +311,10 @@
                                 </td>
                                 <td>
                                     <strong>@rule.Name</strong>
+                                    @if (rule.IsModifiedSinceImport)
+                                    {
+                                        <span class="badge text-bg-warning ms-2">Changed since import</span>
+                                    }
                                     @if (!string.IsNullOrWhiteSpace(rule.Payee))
                                     {
                                         <div class="small text-muted">Payee: @rule.Payee</div>
