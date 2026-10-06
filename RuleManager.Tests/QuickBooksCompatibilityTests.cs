@@ -330,6 +330,59 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task VendorImport_AddsAndUpdatesClientPayees()
+    {
+        var factory = CreateFactory(nameof(VendorImport_AddsAndUpdatesClientPayees));
+        var (_, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.ClientReferences.Add(new ClientReference
+            {
+                ClientId = clientId,
+                Type = ClientReferenceType.Payee,
+                Name = "Amazon",
+                Source = ClientReferenceSource.Imported
+            });
+            await db.SaveChangesAsync();
+        }
+
+        using var workbook = new HSSFWorkbook();
+        var sheet = workbook.CreateSheet("Worksheet");
+        var header = sheet.CreateRow(0);
+        header.CreateCell(0).SetCellValue("Vendor");
+        header.CreateCell(1).SetCellValue("Company name");
+        header.CreateCell(2).SetCellValue("Open Balance");
+
+        sheet.CreateRow(1).CreateCell(0).SetCellValue("Amazon");
+        sheet.CreateRow(2).CreateCell(0).SetCellValue("TEST Vendor");
+        sheet.CreateRow(3).CreateCell(0).SetCellValue("Verizon");
+
+        using var stream = new MemoryStream();
+        workbook.Write(stream);
+        stream.Position = 0;
+
+        var service = new QuickBooksVendorImportService(factory);
+        var result = await service.ImportAsync(clientId, stream);
+
+        Assert.Equal(3, result.TotalRows);
+        Assert.Equal(2, result.Added);
+        Assert.Equal(1, result.Updated);
+
+        await using var verify = await factory.CreateDbContextAsync();
+        var payees = await verify.ClientReferences
+            .Where(x => x.ClientId == clientId && x.Type == ClientReferenceType.Payee)
+            .OrderBy(x => x.Name)
+            .ToListAsync();
+
+        Assert.Equal(3, payees.Count);
+        Assert.All(payees, x => Assert.Equal(ClientReferenceSource.VendorImport, x.Source));
+        Assert.Contains(payees, x => x.Name == "Amazon");
+        Assert.Contains(payees, x => x.Name == "TEST Vendor");
+        Assert.Contains(payees, x => x.Name == "Verizon");
+    }
+
+    [Fact]
     public async Task Import_RecordsQuickBooksRuleName_AndStartsUnmodified()
     {
         var factory = CreateFactory(nameof(Import_RecordsQuickBooksRuleName_AndStartsUnmodified));
