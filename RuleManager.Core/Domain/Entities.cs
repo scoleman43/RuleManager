@@ -48,6 +48,8 @@ public sealed class ClientReference : Entity
     public Guid ClientId { get; set; }
     public ClientReferenceType Type { get; set; }
     public string Name { get; set; } = string.Empty;
+    public string? QuickBooksAccountType { get; set; }
+    public string? QuickBooksDetailType { get; set; }
     public ClientReferenceSource Source { get; set; } = ClientReferenceSource.Imported;
     public bool IsActive { get; set; } = true;
 }
