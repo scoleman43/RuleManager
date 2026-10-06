@@ -25,6 +25,29 @@ public static class DatabaseInitializer
 
         await db.Database.ExecuteSqlRawAsync(
             """
+            CREATE TABLE IF NOT EXISTS "ClientReferences" (
+                "Id" uuid NOT NULL,
+                "CreatedUtc" timestamp with time zone NOT NULL,
+                "ModifiedUtc" timestamp with time zone NOT NULL,
+                "ClientId" uuid NOT NULL,
+                "Type" integer NOT NULL,
+                "Name" character varying(255) NOT NULL,
+                "Source" integer NOT NULL,
+                "IsActive" boolean NOT NULL DEFAULT TRUE,
+                CONSTRAINT "PK_ClientReferences" PRIMARY KEY ("Id")
+            );
+            """,
+            cancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_ClientReferences_ClientId_Type_Name"
+            ON "ClientReferences" ("ClientId", "Type", "Name");
+            """,
+            cancellationToken);
+
+        await db.Database.ExecuteSqlRawAsync(
+            """
             WITH ranked AS (
                 SELECT "Id",
                        ROW_NUMBER() OVER (PARTITION BY "ClientId" ORDER BY "CreatedUtc", "Id") AS priority
