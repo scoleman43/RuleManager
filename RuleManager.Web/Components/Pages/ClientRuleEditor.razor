@@ -1,3 +1,4 @@
+@page "/clients/{ClientId:guid}/rules/new-credit-card"
 @page "/clients/{ClientId:guid}/rules/{ClientRuleId:guid}/edit"
 @rendermode InteractiveServer
 @using Microsoft.EntityFrameworkCore
@@ -7,9 +8,9 @@
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject NavigationManager Navigation
 
-<PageTitle>Edit Client Rule</PageTitle>
+<PageTitle>@(IsNewRule ? "New Credit Card Rule" : "Edit Client Rule")</PageTitle>
 
-@if (client is null || rule is null)
+@if (client is null || (ClientRuleId.HasValue && rule is null))
 {
     <p>Loading rule...</p>
 }
@@ -18,7 +19,7 @@ else
     <div class="d-flex justify-content-between align-items-center mb-3">
         <div>
             <button class="btn btn-link p-0 mb-2" @onclick="ReturnToClient">← Back to Client Rules</button>
-            <h1>Edit Client-Specific Rule</h1>
+            <h1>@(IsNewRule ? "New Credit Card Rule" : "Edit Client-Specific Rule")</h1>
             <p class="text-muted mb-0">@client.Name — Credit card payment</p>
         </div>
     </div>
@@ -31,8 +32,17 @@ else
     <div class="card">
         <div class="card-body">
             <div class="alert alert-info">
-                This editor is currently limited to verified QuickBooks Credit card payment rules. The exported rule applies to all bank accounts because QBO's XLS format does not preserve source bank scope.
+                Credit card payment rules are client-specific because the destination account comes from this client's QuickBooks Chart of Accounts.
+                The exported rule applies to all source bank accounts because QBO's XLS format does not preserve source bank scope.
             </div>
+
+            @if (!DestinationAccountOptions.Any())
+            {
+                <div class="alert alert-warning">
+                    No bank or credit-card destination accounts are available for this client.
+                    Import the client's QuickBooks Chart of Accounts before creating this rule.
+                </div>
+            }
 
             <div class="row g-3">
                 <div class="col-md-6">
@@ -52,14 +62,14 @@ else
 
                 <div class="col-md-6">
                     <label class="form-label">Destination account</label>
-                    <select class="form-select" @bind="destinationAccount">
+                    <select class="form-select" @bind="destinationAccount" disabled="@(!DestinationAccountOptions.Any())">
                         <option value="">-- Select bank or credit card account --</option>
                         @foreach (var account in DestinationAccountOptions)
                         {
                             <option value="@account">@account</option>
                         }
                     </select>
-                    <div class="form-text">Accounts come from this client's imported QuickBooks references and Chart of Accounts.</div>
+                    <div class="form-text">Accounts come from this client's imported QuickBooks Chart of Accounts.</div>
                 </div>
 
                 <div class="col-md-6">
@@ -71,6 +81,11 @@ else
                             <option value="@option">@option</option>
                         }
                     </select>
+                    <div class="form-text">
+                        @(PayeeOptions.Any()
+                            ? "Payees come from this client's imported QuickBooks Vendors and learned rule references."
+                            : "No payees are loaded for this client yet. Import the QuickBooks Vendors list to populate this dropdown.")
+                    </div>
                 </div>
 
                 <div class="col-md-6">
@@ -135,7 +150,11 @@ else
             }
 
             <div class="d-flex gap-2 mt-4">
-                <button class="btn btn-primary" @onclick="SaveAsync">Save Rule</button>
+                <button class="btn btn-primary"
+                        @onclick="SaveAsync"
+                        disabled="@(!DestinationAccountOptions.Any())">
+                    @(IsNewRule ? "Create Rule" : "Save Rule")
+                </button>
                 <button class="btn btn-outline-secondary" @onclick="ReturnToClient">Cancel</button>
             </div>
         </div>
@@ -144,7 +163,7 @@ else
 
 @code {
     [Parameter] public Guid ClientId { get; set; }
-    [Parameter] public Guid ClientRuleId { get; set; }
+    [Parameter] public Guid? ClientRuleId { get; set; }
 
     private Client? client;
     private ClientRule? rule;
@@ -158,6 +177,8 @@ else
     private bool autoAdd;
     private string? message;
     private bool isError;
+
+    private bool IsNewRule => !ClientRuleId.HasValue;
 
     private IEnumerable<string> DestinationAccountOptions
     {
@@ -202,19 +223,9 @@ else
             .AsNoTracking()
             .SingleOrDefaultAsync(x => x.Id == ClientId);
 
-        rule = await db.ClientRules
-            .AsNoTracking()
-            .SingleOrDefaultAsync(x => x.Id == ClientRuleId && x.ClientId == ClientId);
-
-        if (client is null || rule is null)
+        if (client is null)
         {
             Navigation.NavigateTo("/clients");
-            return;
-        }
-
-        if (rule.TransactionType != RuleTransactionType.CreditCardPayment)
-        {
-            Navigation.NavigateTo($"/clients/{ClientId}/rules");
             return;
         }
 
@@ -224,6 +235,38 @@ else
             .OrderBy(x => x.Name)
             .AsNoTracking()
             .ToListAsync());
+
+        message = null;
+        isError = false;
+
+        if (!ClientRuleId.HasValue)
+        {
+            rule = null;
+            ruleName = string.Empty;
+            destinationAccount = string.Empty;
+            payee = string.Empty;
+            conditionLogic = "all";
+            autoAdd = false;
+            conditions.Clear();
+            conditions.Add(NewCondition());
+            return;
+        }
+
+        rule = await db.ClientRules
+            .AsNoTracking()
+            .SingleOrDefaultAsync(x => x.Id == ClientRuleId.Value && x.ClientId == ClientId);
+
+        if (rule is null)
+        {
+            Navigation.NavigateTo($"/clients/{ClientId}/rules");
+            return;
+        }
+
+        if (rule.TransactionType != RuleTransactionType.CreditCardPayment)
+        {
+            Navigation.NavigateTo($"/clients/{ClientId}/rules");
+            return;
+        }
 
         ruleName = rule.Name;
         destinationAccount = rule.CategoryName ?? string.Empty;
@@ -278,6 +321,12 @@ else
             return;
         }
 
+        if (!DestinationAccountOptions.Contains(destinationAccount, StringComparer.OrdinalIgnoreCase))
+        {
+            SetError("The selected destination account is no longer available for this client.");
+            return;
+        }
+
         if (conditions.Count == 0 || conditions.Any(x => string.IsNullOrWhiteSpace(x.Value)))
         {
             SetError("Every rule needs at least one condition with a value.");
@@ -286,13 +335,61 @@ else
 
         await using var db = await DbFactory.CreateDbContextAsync();
 
-        var entity = await db.ClientRules
-            .SingleOrDefaultAsync(x => x.Id == ClientRuleId && x.ClientId == ClientId);
+        var duplicateClientName = await db.ClientRules
+            .Where(x => x.ClientId == ClientId
+                && (!ClientRuleId.HasValue || x.Id != ClientRuleId.Value))
+            .Select(x => x.Name)
+            .AnyAsync(x => x.ToLower() == name.ToLower());
 
-        if (entity is null)
+        if (duplicateClientName)
         {
-            SetError("The client rule no longer exists.");
+            SetError($"A client-specific rule named '{name}' already exists for this client.");
             return;
+        }
+
+        var assignedMasterRuleIds = await db.ClientRuleAssignments
+            .Where(x => x.ClientId == ClientId)
+            .Select(x => x.MasterRuleId)
+            .ToListAsync();
+
+        var duplicateReusableName = await db.MasterRules
+            .Where(x => assignedMasterRuleIds.Contains(x.Id) && x.IsActive)
+            .Select(x => x.Name)
+            .AnyAsync(x => x.ToLower() == name.ToLower());
+
+        if (duplicateReusableName)
+        {
+            SetError($"An assigned reusable rule named '{name}' already exists for this client. Use a unique QuickBooks rule name.");
+            return;
+        }
+
+        ClientRule entity;
+
+        if (ClientRuleId.HasValue)
+        {
+            entity = await db.ClientRules
+                .SingleOrDefaultAsync(x => x.Id == ClientRuleId.Value && x.ClientId == ClientId)
+                ?? throw new InvalidOperationException("The client rule no longer exists.");
+        }
+        else
+        {
+            var assignmentMax = await db.ClientRuleAssignments
+                .Where(x => x.ClientId == ClientId)
+                .Select(x => (int?)x.ExportPriority)
+                .MaxAsync() ?? 0;
+
+            var clientRuleMax = await db.ClientRules
+                .Where(x => x.ClientId == ClientId)
+                .Select(x => (int?)x.ExportPriority)
+                .MaxAsync() ?? 0;
+
+            entity = new ClientRule
+            {
+                ClientId = ClientId,
+                ExportPriority = Math.Max(assignmentMax, clientRuleMax) + 1
+            };
+
+            db.ClientRules.Add(entity);
         }
 
         entity.Name = name;
@@ -305,10 +402,21 @@ else
         entity.AutoAdd = autoAdd;
         entity.IsAccountSpecific = true;
         entity.IsReadOnlyImport = false;
-        entity.IsModifiedSinceImport =
-            !string.IsNullOrWhiteSpace(entity.ImportedQuickBooksRuleName)
-            || !string.IsNullOrWhiteSpace(entity.SourceImportKey)
-            || entity.IsModifiedSinceImport;
+
+        if (ClientRuleId.HasValue)
+        {
+            entity.IsModifiedSinceImport =
+                !string.IsNullOrWhiteSpace(entity.ImportedQuickBooksRuleName)
+                || !string.IsNullOrWhiteSpace(entity.SourceImportKey)
+                || entity.IsModifiedSinceImport;
+        }
+        else
+        {
+            entity.SourceImportKey = null;
+            entity.ImportedQuickBooksRuleName = null;
+            entity.IsModifiedSinceImport = false;
+        }
+
         entity.OriginalConditionsJson = null;
         entity.OriginalOutputsJson = null;
         entity.Conditions = conditions.Select(x => new RuleCondition
