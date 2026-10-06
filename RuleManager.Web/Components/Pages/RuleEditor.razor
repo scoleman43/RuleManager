@@ -970,13 +970,14 @@ else
             db.MasterRules.Add(masterEntity);
         }
 
-        var hadQuickBooksImportProvenance =
-            !string.IsNullOrWhiteSpace(masterEntity.ImportedQuickBooksRuleName);
-
         ApplyFormValues(masterEntity, name, selectedCategoryId, selectedCategoryName, splitDefinition);
 
-        if (hadQuickBooksImportProvenance)
-            masterEntity.IsModifiedSinceImport = true;
+        if (!string.IsNullOrWhiteSpace(masterEntity.ImportedQuickBooksRuleName)
+            && !string.IsNullOrWhiteSpace(masterEntity.ImportedBaselineJson))
+        {
+            masterEntity.IsModifiedSinceImport =
+                !RuleImportSnapshot.MatchesBaseline(masterEntity);
+        }
 
         await db.SaveChangesAsync();
 
