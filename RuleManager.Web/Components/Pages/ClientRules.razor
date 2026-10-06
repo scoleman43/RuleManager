@@ -61,6 +61,50 @@ else
     </div>
 
     <div class="card mb-4">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-start mb-3">
+                <div>
+                    <h5 class="card-title mb-1">Known QuickBooks References (@clientReferences.Count)</h5>
+                    <div class="text-muted small">
+                        Learned from this client's imported QuickBooks rules. Source bank-account scope is not included in the QBO XLS format.
+                    </div>
+                </div>
+            </div>
+
+            @if (clientReferences.Count == 0)
+            {
+                <div class="text-muted">No QuickBooks references have been discovered for this client yet.</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>Name</th>
+                                <th>Source</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var reference in clientReferences
+                                .OrderBy(x => x.Type)
+                                .ThenBy(x => x.Name))
+                            {
+                                <tr>
+                                    <td>@FormatReferenceType(reference.Type)</td>
+                                    <td><strong>@reference.Name</strong></td>
+                                    <td>@FormatReferenceSource(reference.Source)</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="card mb-4">
         <button type="button"
                 class="btn text-start w-100 p-0 border-0"
                 @onclick="ToggleRuleSetsSection">
@@ -454,6 +498,7 @@ else
     private readonly List<RuleSetRule> ruleSetRules = new();
     private readonly List<ClientRuleAssignment> assignments = new();
     private readonly List<ClientRule> clientSpecificRules = new();
+    private readonly List<ClientReference> clientReferences = new();
     private readonly HashSet<Guid> assignedRuleSetIds = new();
     private readonly HashSet<Guid> expectedFromRuleSets = new();
     private readonly List<string> categoryNames = new();
@@ -614,6 +659,14 @@ else
         clientSpecificRules.AddRange(await db.ClientRules
             .Where(x => x.ClientId == ClientId && x.IsAccountSpecific)
             .OrderBy(x => x.ExportPriority)
+            .ThenBy(x => x.Name)
+            .AsNoTracking()
+            .ToListAsync());
+
+        clientReferences.Clear();
+        clientReferences.AddRange(await db.ClientReferences
+            .Where(x => x.ClientId == ClientId && x.IsActive)
+            .OrderBy(x => x.Type)
             .ThenBy(x => x.Name)
             .AsNoTracking()
             .ToListAsync());
@@ -1034,6 +1087,22 @@ else
         int Priority,
         string Name,
         string Source);
+
+    private static string FormatReferenceType(ClientReferenceType type) => type switch
+    {
+        ClientReferenceType.Category => "Category",
+        ClientReferenceType.Payee => "Payee",
+        ClientReferenceType.Account => "Account",
+        _ => type.ToString()
+    };
+
+    private static string FormatReferenceSource(ClientReferenceSource source) => source switch
+    {
+        ClientReferenceSource.Imported => "Imported",
+        ClientReferenceSource.ManualOverride => "Manual override",
+        ClientReferenceSource.ApiVerified => "API verified",
+        _ => source.ToString()
+    };
 
     private static string FormatTransactionType(RuleTransactionType type) => type switch
     {
