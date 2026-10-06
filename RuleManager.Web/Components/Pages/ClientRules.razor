@@ -1,11 +1,13 @@
 @page "/clients/{ClientId:guid}/rules"
 @rendermode InteractiveServer
+@using Microsoft.AspNetCore.Components.Forms
 @using Microsoft.EntityFrameworkCore
 @using RuleManager.Core.Domain
 @using RuleManager.Data
 @using RuleManager.Data.Services
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject RuleSetAssignmentService RuleSetAssignments
+@inject QuickBooksChartOfAccountsImportService ChartOfAccountsImport
 @inject NavigationManager Navigation
 
 <PageTitle>Client Rules</PageTitle>
@@ -62,14 +64,29 @@ else
 
     <div class="card mb-4">
         <div class="card-body">
-            <div class="d-flex justify-content-between align-items-start mb-3">
+            <div class="d-flex justify-content-between align-items-start gap-3 mb-3 flex-wrap">
                 <div>
                     <h5 class="card-title mb-1">Known QuickBooks References (@clientReferences.Count)</h5>
                     <div class="text-muted small">
-                        Learned from this client's imported QuickBooks rules. Source bank-account scope is not included in the QBO XLS format.
+                        Learned from QuickBooks rule imports and this client's Chart of Accounts export. Source bank-account scope is not included in the QBO rule XLS format.
                     </div>
                 </div>
+                <div style="min-width: 320px;">
+                    <label class="form-label small mb-1">Import QBO Chart of Accounts</label>
+                    <InputFile class="form-control form-control-sm"
+                               OnChange="HandleChartOfAccountsFileAsync"
+                               accept=".csv"
+                               disabled="@isChartOfAccountsImportBusy" />
+                    <div class="form-text">Use the CSV exported from QuickBooks Online → Chart of accounts.</div>
+                </div>
             </div>
+
+            @if (!string.IsNullOrWhiteSpace(referenceMessage))
+            {
+                <div class="alert @(referenceMessageIsError ? "alert-danger" : "alert-success") py-2">
+                    @referenceMessage
+                </div>
+            }
 
             @if (clientReferences.Count == 0)
             {
@@ -77,12 +94,20 @@ else
             }
             else
             {
+                <div class="row g-2 mb-3">
+                    <div class="col-auto"><span class="badge text-bg-light">@clientReferences.Count total</span></div>
+                    <div class="col-auto"><span class="badge text-bg-light">@BankReferenceCount bank</span></div>
+                    <div class="col-auto"><span class="badge text-bg-light">@CreditCardReferenceCount credit card</span></div>
+                    <div class="col-auto"><span class="badge text-bg-light">@clientReferences.Count(x => x.Type == ClientReferenceType.Payee) payee</span></div>
+                </div>
+
                 <div class="table-responsive">
                     <table class="table table-sm align-middle mb-0">
                         <thead>
                             <tr>
-                                <th>Type</th>
-                                <th>Name</th>
+                                <th>Reference</th>
+                                <th>QBO Account Type</th>
+                                <th>Detail Type</th>
                                 <th>Source</th>
                             </tr>
                         </thead>
@@ -92,8 +117,12 @@ else
                                 .ThenBy(x => x.Name))
                             {
                                 <tr>
-                                    <td>@FormatReferenceType(reference.Type)</td>
-                                    <td><strong>@reference.Name</strong></td>
+                                    <td>
+                                        <strong>@reference.Name</strong>
+                                        <div class="small text-muted">@FormatReferenceType(reference.Type)</div>
+                                    </td>
+                                    <td>@(reference.QuickBooksAccountType ?? "—")</td>
+                                    <td>@(reference.QuickBooksDetailType ?? "—")</td>
                                     <td>@FormatReferenceSource(reference.Source)</td>
                                 </tr>
                             }
@@ -504,6 +533,9 @@ else
     private readonly List<string> categoryNames = new();
 
     private string? message;
+    private string? referenceMessage;
+    private bool referenceMessageIsError;
+    private bool isChartOfAccountsImportBusy;
     private bool showRuleSetsSection;
     private bool showAssignedRulesSection;
 
@@ -598,6 +630,10 @@ else
 
     private int SetRuleCount => AssignedRules.Count(x => expectedFromRuleSets.Contains(x.Id));
     private int DirectRuleCount => AssignedRules.Count(x => AssignmentFor(x.Id)?.IsExplicit == true);
+    private int BankReferenceCount => clientReferences.Count(x =>
+        string.Equals(x.QuickBooksAccountType, "Bank", StringComparison.OrdinalIgnoreCase));
+    private int CreditCardReferenceCount => clientReferences.Count(x =>
+        string.Equals(x.QuickBooksAccountType, "Credit Card", StringComparison.OrdinalIgnoreCase));
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
@@ -780,6 +816,41 @@ else
         }
 
         await db.SaveChangesAsync();
+    }
+
+    private async Task HandleChartOfAccountsFileAsync(InputFileChangeEventArgs e)
+    {
+        referenceMessage = null;
+        referenceMessageIsError = false;
+
+        var file = e.File;
+        if (!file.Name.EndsWith(".csv", StringComparison.OrdinalIgnoreCase))
+        {
+            referenceMessage = "Select the .csv file exported from QuickBooks Online Chart of accounts.";
+            referenceMessageIsError = true;
+            return;
+        }
+
+        isChartOfAccountsImportBusy = true;
+
+        try
+        {
+            await using var stream = file.OpenReadStream(maxAllowedSize: 5 * 1024 * 1024);
+            var result = await ChartOfAccountsImport.ImportAsync(ClientId, stream);
+
+            referenceMessage =
+                $"Chart of Accounts imported: {result.TotalRows} row(s), {result.Added} added, {result.Updated} updated.";
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            referenceMessage = $"Chart of Accounts import failed: {ex.Message}";
+            referenceMessageIsError = true;
+        }
+        finally
+        {
+            isChartOfAccountsImportBusy = false;
+        }
     }
 
     private void BackToClients() => Navigation.NavigateTo("/clients");
@@ -1098,7 +1169,8 @@ else
 
     private static string FormatReferenceSource(ClientReferenceSource source) => source switch
     {
-        ClientReferenceSource.Imported => "Imported",
+        ClientReferenceSource.Imported => "Rule import",
+        ClientReferenceSource.ChartOfAccountsImport => "Chart of Accounts import",
         ClientReferenceSource.ManualOverride => "Manual override",
         ClientReferenceSource.ApiVerified => "API verified",
         _ => source.ToString()
