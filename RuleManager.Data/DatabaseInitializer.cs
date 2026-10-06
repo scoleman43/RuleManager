@@ -30,10 +30,16 @@ public static class DatabaseInitializer
             """ALTER TABLE "MasterRules" ADD COLUMN IF NOT EXISTS "IsModifiedSinceImport" boolean NOT NULL DEFAULT FALSE;""",
             cancellationToken);
         await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "MasterRules" ADD COLUMN IF NOT EXISTS "ImportedBaselineJson" text;""",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "ClientRules" ADD COLUMN IF NOT EXISTS "ImportedQuickBooksRuleName" character varying(255);""",
             cancellationToken);
         await db.Database.ExecuteSqlRawAsync(
             """ALTER TABLE "ClientRules" ADD COLUMN IF NOT EXISTS "IsModifiedSinceImport" boolean NOT NULL DEFAULT FALSE;""",
+            cancellationToken);
+        await db.Database.ExecuteSqlRawAsync(
+            """ALTER TABLE "ClientRules" ADD COLUMN IF NOT EXISTS "ImportedBaselineJson" text;""",
             cancellationToken);
 
         await db.Database.ExecuteSqlRawAsync(
@@ -122,6 +128,27 @@ public static class DatabaseInitializer
             WHERE r."Id" = ranked."Id";
             """,
             cancellationToken);
+
+        var importedMasterRules = await db.MasterRules
+            .Where(x => x.ImportedQuickBooksRuleName != null
+                && x.ImportedBaselineJson == null
+                && !x.IsModifiedSinceImport)
+            .ToListAsync(cancellationToken);
+
+        foreach (var rule in importedMasterRules)
+            rule.ImportedBaselineJson = RuleManager.Core.Rules.RuleImportSnapshot.Serialize(rule);
+
+        var importedClientRules = await db.ClientRules
+            .Where(x => x.ImportedQuickBooksRuleName != null
+                && x.ImportedBaselineJson == null
+                && !x.IsModifiedSinceImport)
+            .ToListAsync(cancellationToken);
+
+        foreach (var rule in importedClientRules)
+            rule.ImportedBaselineJson = RuleManager.Core.Rules.RuleImportSnapshot.Serialize(rule);
+
+        if (importedMasterRules.Count > 0 || importedClientRules.Count > 0)
+            await db.SaveChangesAsync(cancellationToken);
 
         var workspace = scope.ServiceProvider.GetRequiredService<WorkspaceService>();
         await workspace.GetOrCreateDefaultOrganizationIdAsync(cancellationToken);
