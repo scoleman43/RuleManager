@@ -704,8 +704,7 @@ else
 
     private IEnumerable<string> SplitCategoryOptions(QuickBooksSplitLine line)
     {
-        var names = categories
-            .Where(x => x.IsActive)
+        var names = CategoryOptions
             .Select(x => x.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
