@@ -305,6 +305,10 @@ else
         entity.AutoAdd = autoAdd;
         entity.IsAccountSpecific = true;
         entity.IsReadOnlyImport = false;
+        entity.IsModifiedSinceImport =
+            !string.IsNullOrWhiteSpace(entity.ImportedQuickBooksRuleName)
+            || !string.IsNullOrWhiteSpace(entity.SourceImportKey)
+            || entity.IsModifiedSinceImport;
         entity.OriginalConditionsJson = null;
         entity.OriginalOutputsJson = null;
         entity.Conditions = conditions.Select(x => new RuleCondition
