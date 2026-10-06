@@ -4,9 +4,13 @@
 @using RuleManager.Core.Domain
 @using RuleManager.Data
 @using RuleManager.Data.Services
+@using Microsoft.JSInterop
 @inject IDbContextFactory<RuleManagerDbContext> DbFactory
 @inject WorkspaceService Workspace
+@inject ClientCloneService ClientClone
+@inject QuickBooksChartOfAccountsExportService ChartOfAccountsExport
 @inject NavigationManager Navigation
+@inject IJSRuntime JS
 
 <PageTitle>Clients</PageTitle>
 
@@ -52,6 +56,74 @@
     </div>
 }
 
+@if (showCloneEditor && cloneSource is not null)
+{
+    <div class="rule-modal-backdrop" @onclick="CancelClone">
+        <div class="rule-modal-dialog" @onclick:stopPropagation="true">
+            <div class="rule-modal-header">
+                <div>
+                    <div class="rule-modal-eyebrow">Clone client</div>
+                    <h5 class="mb-1">@cloneSource.Name</h5>
+                    <div class="text-muted small">
+                        Copy this client's RuleManager configuration to a new QuickBooks company.
+                    </div>
+                </div>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="CancelClone">Close</button>
+            </div>
+
+            <div class="rule-modal-body">
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">New client name</label>
+                        <input class="form-control" @bind="cloneModel.Name" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">QuickBooks company name</label>
+                        <input class="form-control" @bind="cloneModel.QuickBooksCompanyName" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Notes</label>
+                        <textarea class="form-control" @bind="cloneModel.Notes"></textarea>
+                    </div>
+                </div>
+
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" @bind="cloneModel.CopyQuickBooksReferences" id="cloneReferences" />
+                    <label class="form-check-label" for="cloneReferences">
+                        Copy QuickBooks references into the new RuleManager client
+                    </label>
+                    <div class="form-text">
+                        Copies the source client's Chart of Accounts, bank/credit-card accounts, vendors/payees, and learned references.
+                        Use this when the new QBO company is intentionally configured the same way.
+                    </div>
+                </div>
+
+                <div class="form-check mt-3">
+                    <input class="form-check-input" type="checkbox" @bind="cloneModel.DownloadChartOfAccounts" id="cloneDownloadCoa" />
+                    <label class="form-check-label" for="cloneDownloadCoa">
+                        Create a QBO Chart of Accounts import file
+                    </label>
+                    <div class="form-text">
+                        Downloads a CSV with Account Number, Account Name, Type, and Detail Type so the source Chart of Accounts can be imported into the new QuickBooks company.
+                    </div>
+                </div>
+
+                <div class="alert alert-info mt-3 mb-0">
+                    The clone copies assigned Rule Sets, direct reusable rules, export priority, client-specific rules, and client mappings.
+                    QuickBooks import/change provenance is reset for the new client.
+                </div>
+            </div>
+
+            <div class="rule-modal-footer">
+                <button class="btn btn-outline-secondary" @onclick="CancelClone">Cancel</button>
+                <button class="btn btn-primary" @onclick="CloneClientAsync" disabled="@cloneBusy">
+                    @(cloneBusy ? "Cloning..." : "Clone Client")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
 <div class="card">
     <div class="card-body p-0">
         @if (clients.Count == 0)
@@ -93,6 +165,7 @@
                                         Rules
                                     </button>
                                     <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => BeginEdit(client)">Edit</button>
+                                    <button class="btn btn-sm btn-outline-primary me-2" @onclick="() => BeginClone(client)">Clone</button>
                                     <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleActiveAsync(client)">
                                         @(client.IsActive ? "Deactivate" : "Activate")
                                     </button>
@@ -111,6 +184,10 @@
     private ClientEditModel editModel = new();
     private Guid organizationId;
     private bool showEditor;
+    private bool showCloneEditor;
+    private bool cloneBusy;
+    private Client? cloneSource;
+    private CloneClientEditModel cloneModel = new();
     private string? message;
 
     protected override async Task OnInitializedAsync()
@@ -149,6 +226,96 @@
         };
         showEditor = true;
         message = null;
+    }
+
+    private void BeginClone(Client client)
+    {
+        cloneSource = client;
+        cloneModel = new CloneClientEditModel
+        {
+            Name = $"{client.Name} - Copy",
+            QuickBooksCompanyName = string.Empty,
+            Notes = client.Notes ?? string.Empty,
+            CopyQuickBooksReferences = true,
+            DownloadChartOfAccounts = true
+        };
+        showCloneEditor = true;
+        showEditor = false;
+        message = null;
+    }
+
+    private void CancelClone()
+    {
+        showCloneEditor = false;
+        cloneSource = null;
+        cloneModel = new CloneClientEditModel();
+    }
+
+    private async Task CloneClientAsync()
+    {
+        if (cloneSource is null || cloneBusy)
+            return;
+
+        var newName = cloneModel.Name.Trim();
+        if (string.IsNullOrWhiteSpace(newName))
+        {
+            message = "New client name is required.";
+            return;
+        }
+
+        cloneBusy = true;
+
+        try
+        {
+            var result = await ClientClone.CloneAsync(
+                cloneSource.Id,
+                new CloneClientRequest(
+                    newName,
+                    NullIfWhiteSpace(cloneModel.QuickBooksCompanyName),
+                    NullIfWhiteSpace(cloneModel.Notes),
+                    cloneModel.CopyQuickBooksReferences));
+
+            if (cloneModel.DownloadChartOfAccounts)
+            {
+                try
+                {
+                    var export = await ChartOfAccountsExport.GenerateAsync(
+                        cloneSource.Id,
+                        newName);
+
+                    await using var stream = new MemoryStream(export.Content);
+                    using var streamReference = new DotNetStreamReference(stream);
+
+                    await JS.InvokeVoidAsync(
+                        "downloadFileFromStream",
+                        export.FileName,
+                        streamReference,
+                        "text/csv;charset=utf-8");
+                }
+                catch (InvalidOperationException)
+                {
+                    // The source may not have an imported Chart of Accounts.
+                    // The clone itself is still valid.
+                }
+            }
+
+            message =
+                $"Client '{newName}' cloned: {result.RuleSetCount} Rule Set(s), " +
+                $"{result.ReusableRuleCount} reusable assignment(s), " +
+                $"{result.ClientSpecificRuleCount} client-specific rule(s), " +
+                $"{result.ReferenceCount} QuickBooks reference(s) copied.";
+
+            CancelClone();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            message = $"Client clone failed: {ex.Message}";
+        }
+        finally
+        {
+            cloneBusy = false;
+        }
     }
 
     private void CancelEdit()
@@ -216,5 +383,14 @@
         public string Name { get; set; } = string.Empty;
         public string QuickBooksCompanyName { get; set; } = string.Empty;
         public string Notes { get; set; } = string.Empty;
+    }
+
+    private sealed class CloneClientEditModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string QuickBooksCompanyName { get; set; } = string.Empty;
+        public string Notes { get; set; } = string.Empty;
+        public bool CopyQuickBooksReferences { get; set; } = true;
+        public bool DownloadChartOfAccounts { get; set; } = true;
     }
 }
