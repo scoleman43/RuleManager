@@ -74,6 +74,8 @@ public abstract class RuleBase : Entity
     public bool AutoAdd { get; set; }
     public string? OriginalConditionsJson { get; set; }
     public string? OriginalOutputsJson { get; set; }
+    public string? ImportedQuickBooksRuleName { get; set; }
+    public bool IsModifiedSinceImport { get; set; }
     public bool IsAccountSpecific { get; set; }
     public bool IsReadOnlyImport { get; set; }
 }
