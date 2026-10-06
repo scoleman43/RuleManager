@@ -763,6 +763,56 @@ public sealed class QuickBooksCompatibilityTests
     }
 
     [Fact]
+    public async Task Export_GeneratesVerifiedMoneyInCreditCardPaymentJson()
+    {
+        var factory = CreateFactory(nameof(Export_GeneratesVerifiedMoneyInCreditCardPaymentJson));
+        var (_, clientId) = await SeedClientAsync(factory);
+
+        await using (var db = await factory.CreateDbContextAsync())
+        {
+            db.ClientRules.Add(new ClientRule
+            {
+                ClientId = clientId,
+                Name = "T055",
+                Direction = RuleDirection.MoneyIn,
+                TransactionType = RuleTransactionType.CreditCardPayment,
+                CategoryName = "QuickBooks Checking Account",
+                MatchAllConditions = true,
+                IsAccountSpecific = true,
+                IsReadOnlyImport = false,
+                ExportPriority = 1,
+                Conditions = new()
+                {
+                    new RuleCondition
+                    {
+                        Field = RuleMatchField.BankText,
+                        Operator = RuleMatchOperator.Contains,
+                        Value = "T055"
+                    }
+                }
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var service = new QuickBooksRuleExportService(factory);
+        var result = await service.GenerateClientExportAsync(clientId);
+
+        Assert.True(result.Success, string.Join(Environment.NewLine, result.Errors));
+
+        using var stream = new MemoryStream(result.Content!);
+        using var workbook = new HSSFWorkbook(stream);
+        var row = workbook.GetSheetAt(0).GetRow(1);
+
+        Assert.Equal(
+            "{\"ruleConditions\":[{\"ruleType\":10,\"value\":\"1\"},{\"ruleType\":6,\"value\":\"T055\"}],\"isAndRule\":true}",
+            row.GetCell(1).StringCellValue);
+
+        Assert.Equal(
+            "{\"ruleActions\":[{\"actionType\":0,\"value\":\"QuickBooks Checking Account\"},{\"actionType\":7,\"value\":\"64\"}]}",
+            row.GetCell(2).StringCellValue);
+    }
+
+    [Fact]
     public async Task Export_GeneratesEditableClientCreditCardPaymentJson()
     {
         var factory = CreateFactory(nameof(Export_GeneratesEditableClientCreditCardPaymentJson));
